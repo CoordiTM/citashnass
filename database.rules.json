@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "solicitudes": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["dni"]
+    },
+    "usuarios": {
+      ".read": true,
+      ".write": true
+    },
+    "indicaciones": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

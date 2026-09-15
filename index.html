@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Citas — Radiodiagnóstico y Ecografía | HNASS</title>
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo-row">
+    <div class="badge">🏥</div>
+    <div>
+      <h1>Citas — Servicio de Radiodiagnóstico y Ecografía</h1>
+      <p>Hospital Nacional Alberto Sabogal Sologuren</p>
+    </div>
+  </div>
+</header>
+
+<main class="contenedor">
+
+  <div class="alerta alerta-info visible">
+    📋 <strong>Exámenes con cita digital:</strong> exámenes contrastados (HSG, esofagograma, cistografía,
+    tránsito intestinal, colon contrastado, etc.), biopsias de mama por ecografía y ecografías de hospitalización.
+    Sube tu solicitud aquí; el residente de radiología la revisará y confirmará tu fecha.
+  </div>
+
+  <div class="pestanas">
+    <button class="pestana activa" id="pestanaSolicitar" type="button">📝 Solicitar cita</button>
+    <button class="pestana" id="pestanaConsultar" type="button">🔍 Consultar mi cita</button>
+  </div>
+
+  <!-- ============ SOLICITAR CITA ============ -->
+  <section id="seccionSolicitar">
+    <div class="tarjeta">
+      <h2>1. Datos del paciente</h2>
+      <div class="rejilla">
+        <div class="campo campo-obligatorio">
+          <label for="dni">DNI del paciente</label>
+          <input type="text" id="dni" inputmode="numeric" maxlength="8" placeholder="Ej: 12345678">
+          <div class="ayuda">Con este número consultarás tu cita más adelante.</div>
+        </div>
+        <div class="campo campo-obligatorio">
+          <label for="telefono">Número de contacto (celular)</label>
+          <input type="tel" id="telefono" inputmode="tel" maxlength="9" placeholder="Ej: 987654321">
+          <div class="ayuda">Por si necesitamos comunicarnos contigo.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>2. Solicitud médica (foto o PDF)</h2>
+      <div class="campo campo-obligatorio">
+        <label>Sube la orden o solicitud del examen</label>
+        <label class="zona-subida" id="zonaSubida">
+          <input type="file" id="archivo" accept="image/*,application/pdf">
+          <div class="icono">📷</div>
+          <div><strong>Toca para tomar foto o elegir archivo</strong></div>
+          <div class="ayuda">Formatos: imagen (JPG/PNG) o PDF — máx. 8 MB</div>
+        </label>
+        <div class="vista-previa" id="vistaPrevia">
+          <img id="previewImg" alt="Vista previa de la solicitud">
+          <div class="archivo-pdf oculto" id="previewPdf">📄 <span id="nombrePdf"></span></div>
+        </div>
+      </div>
+      <div id="alertaSolicitud" class="alerta"></div>
+      <button class="btn btn-primario btn-bloque" id="btnEnviar" type="button">Enviar solicitud de cita</button>
+    </div>
+  </section>
+
+  <!-- ============ CONSULTAR CITA ============ -->
+  <section id="seccionConsultar" class="oculto">
+    <div class="tarjeta">
+      <h2>Busca tu cita</h2>
+      <div class="campo campo-obligatorio">
+        <label for="dniBuscar">DNI del paciente</label>
+        <input type="text" id="dniBuscar" inputmode="numeric" maxlength="8" placeholder="Ej: 12345678">
+      </div>
+      <div id="alertaConsulta" class="alerta"></div>
+      <button class="btn btn-primario btn-bloque" id="btnBuscar" type="button">Buscar mi cita</button>
+    </div>
+
+    <div id="resultadoConsulta"></div>
+  </section>
+
+  <footer class="texto-centrado" style="color: var(--gris); font-size: .8rem; margin-top: 24px;">
+    <p>Servicio de Radiodiagnóstico y Ecografía — HNASS · Para personal: <a href="panel.html">acceso al panel</a></p>
+  </footer>
+</main>
+
+<script type="module" src="js/public.js"></script>
+</body>
+</html>
