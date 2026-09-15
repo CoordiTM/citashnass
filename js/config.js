@@ -13,11 +13,10 @@ export const firebaseConfig = {
   appId: "1:695692341631:web:247364c84bbb29486dea4a"
 };
 
-// 2) CLOUDINARY — para las fotos/PDF de solicitudes
-//    ⚠️ COMPLETA ESTOS DOS VALORES (Dashboard de Cloudinary + Upload preset "Unsigned")
+// 2) CLOUDINARY — cuenta existente (misma del SSP Rx Portátil)
 export const cloudinaryConfig = {
-  cloudName: "PEGA_AQUI_TU_CLOUD_NAME",
-  uploadPreset: "PEGA_AQUI_TU_UPLOAD_PRESET",
+  cloudName: "dugihbmyc",
+  uploadPreset: "Unsigned",
   folder: "citas_rx"
 };
 
