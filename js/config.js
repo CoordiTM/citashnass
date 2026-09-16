@@ -1,30 +1,35 @@
 // =============================================================
 //  CONFIGURACIÓN DEL SISTEMA — Citas Radiodiagnóstico y Ecografía
+//  Completa estos datos con la información de TU proyecto.
 // =============================================================
 
-// 1) FIREBASE — proyecto citashnass
+// 1) FIREBASE (consola.firebase.google.com)
+//    - Activa: Authentication (Correo/contraseña y Anónimo)
+//    - Activa: Realtime Database
 export const firebaseConfig = {
-  apiKey: "AIzaSyCe3ObnriEh8pBvITswUaIBqHzW81qLijs",
-  authDomain: "citashnass.firebaseapp.com",
-  databaseURL: "https://citashnass-default-rtdb.firebaseio.com",
-  projectId: "citashnass",
-  storageBucket: "citashnass.firebasestorage.app",
-  messagingSenderId: "695692341631",
-  appId: "1:695692341631:web:247364c84bbb29486dea4a"
+  apiKey: "PEGA_AQUI_TU_API_KEY",
+  authDomain: "PEGA_AQUI_TU_PROYECTO.firebaseapp.com",
+  databaseURL: "https://PEGA_AQUI_TU_PROYECTO-default-rtdb.firebaseio.com",
+  projectId: "PEGA_AQUI_TU_PROYECTO",
+  storageBucket: "PEGA_AQUI_TU_PROYECTO.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:xxxxxxxxxxxxxxxx"
 };
 
-// 2) CLOUDINARY — cuenta existente (misma del SSP Rx Portátil)
+// 2) CLOUDINARY (cloudinary.com) — para las fotos/PDF de solicitudes
+//    Crea un "Upload preset" de tipo UNSIGNED y pon su nombre aquí.
 export const cloudinaryConfig = {
-  cloudName: "dugihbmyc",
-  uploadPreset: "Unsigned",
+  cloudName: "PEGA_AQUI_TU_CLOUD_NAME",
+  uploadPreset: "PEGA_AQUI_TU_UPLOAD_PRESET",
   folder: "citas_rx"
 };
 
-// 3) URL pública del sistema (QR de ventanilla)
-export const SITE_URL = "https://coorditm.github.io/citashnass/";
+// 3) URL pública del sistema (para el QR de ventanilla)
+//    Cámbiala cuando sepas la URL final de GitHub Pages.
+export const SITE_URL = "https://TU_USUARIO.github.io/citas-rx/";
 
-// 4) Frase secreta para cifrar las claves de acceso (NO la compartas)
-export const CLAVE_SAL = "hn4ss-c1t4s-rx-2026-s0l0-4dm1n";
+// 4) Frase secreta para cifrar las claves de acceso (cámbiala y no la compartas)
+export const CLAVE_SAL = "cambia-esta-frase-secreta-hnass";
 
 // Datos institucionales (aparecen en pantallas y PDF)
 export const NOMBRE_HOSPITAL = "Hospital Nacional Alberto Sabogal Sologuren";

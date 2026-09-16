@@ -41,8 +41,9 @@ async function entrar(u) {
   $("vistaApp").classList.remove("oculto");
   $("infoUsuario").textContent = ` — ${u.nombre} (${ROLES[u.rol]})`;
   construirNavegacion();
-  cargarSeccion(seccionPorDefecto());
   escucharSolicitudes();
+  cargarSolicitudes();
+  cargarSeccion(seccionPorDefecto());
 }
 
 // Al cargar: si no hay usuarios, mostrar configuración inicial; si hay sesión guardada, entrar
@@ -170,14 +171,26 @@ function cargarSeccion(clave) {
 // ============================================================
 //  SOLICITUDES (residente)
 // ============================================================
-function escucharSolicitudes() {
-  if (!["residente", "admin"].includes(rolActual)) return;
-  onValue(ref(db, "solicitudes"), (snap) => {
+async function cargarSolicitudes() {
+  try {
+    const snap = await get(ref(db, "solicitudes"));
     solicitudesCache = [];
     snap.forEach((child) => solicitudesCache.push({ id: child.key, ...child.val() }));
     solicitudesCache.sort((a, b) => (b.creadoEl || "").localeCompare(a.creadoEl || ""));
     if (!$("seccionSolicitudes").classList.contains("oculto")) renderSolicitudes();
     if (!$("seccionListado").classList.contains("oculto")) cargarListado();
+  } catch (err) {
+    console.error("Error al cargar solicitudes:", err);
+  }
+}
+
+function escucharSolicitudes() {
+  // Tiempo real (si la red lo permite)…
+  onValue(ref(db, "solicitudes"), () => cargarSolicitudes());
+  // …y refresco periódico + al volver a la pestaña, por si el firewall corta el WebSocket
+  setInterval(cargarSolicitudes, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) cargarSolicitudes();
   });
 }
 
@@ -186,17 +199,18 @@ document.querySelectorAll("#pestanasEstado .pestana").forEach((btn) => {
     document.querySelectorAll("#pestanasEstado .pestana").forEach((b) => b.classList.remove("activa"));
     btn.classList.add("activa");
     estadoFiltro = btn.dataset.estado;
-    renderSolicitudes();
+    cargarSolicitudes();
   });
 });
 
-$("filtroFecha").addEventListener("change", renderSolicitudes);
+$("filtroFecha").addEventListener("change", cargarSolicitudes);
 $("filtroDni").addEventListener("input", renderSolicitudes);
 $("btnLimpiarFiltros").addEventListener("click", () => {
   $("filtroFecha").value = "";
   $("filtroDni").value = "";
-  renderSolicitudes();
+  cargarSolicitudes();
 });
+$("btnActualizarSolicitudes").addEventListener("click", cargarSolicitudes);
 
 function renderSolicitudes() {
   const lista = $("listaSolicitudes");
@@ -429,23 +443,19 @@ async function cargarListado() {
   const tipo = $("listadoTipo").value;
   if (!desde || !hasta) return;
 
-  let datos = [];
-  if (["residente", "admin"].includes(rolActual)) {
-    datos = solicitudesCache;
-  } else {
-    // digitador: lee directamente de la base de datos (solo aprobadas)
-    const snap = await get(ref(db, "solicitudes"));
-    snap.forEach((child) => {
-      const s = child.val();
-      if (s.estado === "aprobada") datos.push({ id: child.key, ...s });
-    });
-  }
+  // Mismo origen de datos para todos los roles (residente, digitador y admin)
+  if (!solicitudesCache.length) await cargarSolicitudes();
 
-  const filtradas = datos
+  // El filtro es por FECHA DE APROBACIÓN (lo que el residente aprobó ese día),
+  // no por la fecha futura de la cita.
+  const filtradas = solicitudesCache
     .filter((s) => s.estado === "aprobada")
-    .filter((s) => s.fecha >= desde && s.fecha <= hasta)
+    .filter((s) => {
+      const dia = (s.aprobadaEl || "").slice(0, 10);
+      return dia >= desde && dia <= hasta;
+    })
     .filter((s) => !tipo || s.tipo === tipo)
-    .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+    .sort((a, b) => (b.aprobadaEl || "").localeCompare(a.aprobadaEl || ""));
 
   const tbody = $("tablaListado").querySelector("tbody");
   tbody.innerHTML = "";
@@ -460,6 +470,7 @@ async function cargarListado() {
       <td>${tipoExamenTexto(s.tipo)}</td>
       <td>${s.fecha}</td>
       <td>${s.hora}</td>
+      <td>${formatearFechaHora(s.aprobadaEl)}</td>
       <td>${s.telefono}</td>
       <td><button class="btn btn-gris btn-chico" data-doc="${s.id}" type="button">⬇️ Sellado</button></td>`;
     tbody.appendChild(tr);
@@ -471,16 +482,20 @@ async function cargarListado() {
     }));
 }
 
-$("btnListadoPdf").addEventListener("click", () => {
+$("btnListadoPdf").addEventListener("click", async () => {
+  await cargarSolicitudes(); // asegura datos frescos para cualquier rol
   const desde = $("listadoDesde").value;
   const hasta = $("listadoHasta").value;
   const tipo = $("listadoTipo").value;
   const filtradas = solicitudesCache
     .filter((s) => s.estado === "aprobada")
-    .filter((s) => s.fecha >= desde && s.fecha <= hasta)
+    .filter((s) => {
+      const dia = (s.aprobadaEl || "").slice(0, 10);
+      return dia >= desde && dia <= hasta;
+    })
     .filter((s) => !tipo || s.tipo === tipo)
-    .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
-  if (!filtradas.length) return alert("No hay citas aprobadas en el rango seleccionado.");
+    .sort((a, b) => (b.aprobadaEl || "").localeCompare(a.aprobadaEl || ""));
+  if (!filtradas.length) return alert("No hay citas aprobadas en el rango seleccionado (por fecha de aprobación). Amplía las fechas (desde/hasta).");
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "landscape" });
@@ -495,11 +510,12 @@ $("btnListadoPdf").addEventListener("click", () => {
 
   doc.setTextColor(17, 24, 39);
   doc.setFontSize(10);
-  doc.text(`Rango: ${desde} al ${hasta}${tipo ? "  ·  Examen: " + tipoExamenTexto(tipo) : ""}  ·  Generado: ${new Date().toLocaleString("es-PE")}`, 14, 32);
+  doc.text(`Aprobadas del ${desde} al ${hasta}${tipo ? "  ·  Examen: " + tipoExamenTexto(tipo) : ""}  ·  Generado: ${new Date().toLocaleString("es-PE")}`, 14, 32);
 
-  const cabeceras = [["N°", "DNI", "Paciente", "Examen", "Fecha", "Hora", "Contacto", "Indicaciones"]];
+  const cabeceras = [["N°", "DNI", "Paciente", "Examen", "Fecha cita", "Hora", "Aprobada el", "Contacto", "Indicaciones"]];
   const filas = filtradas.map((s, i) => [
-    String(i + 1), s.dni, s.paciente || "-", tipoExamenTexto(s.tipo), s.fecha, s.hora, s.telefono,
+    String(i + 1), s.dni, s.paciente || "-", tipoExamenTexto(s.tipo), s.fecha, s.hora,
+    formatearFechaHora(s.aprobadaEl), s.telefono,
     (s.indicaciones || "").replace(/\n/g, " ")
   ]);
 

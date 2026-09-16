@@ -90,6 +90,7 @@
             <input type="text" id="filtroDni" maxlength="8" placeholder="DNI">
           </div>
           <button class="btn btn-gris" id="btnLimpiarFiltros" type="button">Limpiar</button>
+          <button class="btn btn-gris" id="btnActualizarSolicitudes" type="button">🔄 Actualizar</button>
         </div>
         <div class="lista-solicitudes" id="listaSolicitudes"></div>
         <p id="sinResultados" class="texto-centrado oculto" style="color: var(--gris); padding: 20px;">
@@ -104,11 +105,11 @@
         <h2>Listado de citas aprobadas — para citar en ESSI</h2>
         <div class="filtros">
           <div class="campo">
-            <label>Desde (fecha de cita)</label>
+            <label>Desde (aprobada el)</label>
             <input type="date" id="listadoDesde">
           </div>
           <div class="campo">
-            <label>Hasta (fecha de cita)</label>
+            <label>Hasta (aprobada el)</label>
             <input type="date" id="listadoHasta">
           </div>
           <div class="campo">
@@ -123,7 +124,7 @@
           <table class="tabla" id="tablaListado">
             <thead>
               <tr>
-                <th>N°</th><th>DNI</th><th>Paciente</th><th>Examen</th><th>Fecha</th><th>Hora</th><th>Contacto</th><th>Documento</th>
+                <th>N°</th><th>DNI</th><th>Paciente</th><th>Examen</th><th>Fecha cita</th><th>Hora</th><th>Aprobada el</th><th>Contacto</th><th>Documento</th>
               </tr>
             </thead>
             <tbody></tbody>
