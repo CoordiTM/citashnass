@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel — Citas Radiodiagnóstico y Ecografía</title>
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="vistaLogin" class="login-contenedor">
+  <div class="login-logo">
+    <div class="icono">🏥</div>
+    <h1 style="font-size: 1.3rem; color: var(--azul-oscuro);">Citas — Radiodiagnóstico y Ecografía</h1>
+    <p style="color: var(--gris); font-size: .88rem;">Acceso para residentes, digitadores y administradores</p>
+  </div>
+  <div class="tarjeta">
+    <div class="campo campo-obligatorio">
+      <label for="loginEmail">Usuario</label>
+      <input type="text" id="loginEmail" autocomplete="username" placeholder="Ej: residente01">
+    </div>
+    <div class="campo campo-obligatorio">
+      <label for="loginPassword">Contraseña</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <div id="alertaLogin" class="alerta"></div>
+    <button class="btn btn-primario btn-bloque" id="btnLogin" type="button">Ingresar</button>
+    <p class="texto-centrado mt" style="font-size: .82rem;">
+      <a href="index.html" style="color: var(--azul);">← Volver al portal de pacientes</a>
+    </p>
+  </div>
+
+  <!-- Configuración inicial: solo aparece cuando no hay usuarios registrados -->
+  <div class="tarjeta oculto" id="setupInicial">
+    <h2>⚙️ Configuración inicial — crear administrador</h2>
+    <p style="color: var(--gris); font-size: .88rem; margin-bottom: 12px;">
+      Es la primera vez que se usa el sistema. Crea la cuenta del administrador;
+      luego podrás agregar residentes y digitadores desde el panel.
+    </p>
+    <div class="campo campo-obligatorio">
+      <label for="setupUsuario">Usuario</label>
+      <input type="text" id="setupUsuario" placeholder="Ej: admin">
+    </div>
+    <div class="campo campo-obligatorio">
+      <label for="setupNombre">Nombre completo</label>
+      <input type="text" id="setupNombre" placeholder="Dr(a). Apellidos, Nombres">
+    </div>
+    <div class="campo campo-obligatorio">
+      <label for="setupClave">Clave</label>
+      <input type="password" id="setupClave" placeholder="Mínimo 4 caracteres">
+    </div>
+    <div id="alertaSetup" class="alerta"></div>
+    <button class="btn btn-verde btn-bloque" id="btnSetup" type="button">Crear administrador</button>
+  </div>
+</div>
+
+<!-- ============ APLICACIÓN ============ -->
+<div id="vistaApp" class="oculto">
+  <div class="barra-superior">
+    <div>
+      <strong>🩻 Citas RX y Ecografía</strong>
+      <span class="usuario" id="infoUsuario"></span>
+    </div>
+    <button class="btn btn-gris btn-chico" id="btnSalir" type="button">Cerrar sesión</button>
+  </div>
+
+  <main class="contenedor">
+    <div class="navegacion-roles" id="navegacionRoles"></div>
+
+    <!-- ===== SOLICITUDES (residente/admin) ===== -->
+    <section id="seccionSolicitudes" class="oculto">
+      <div class="tarjeta">
+        <div class="pestanas" id="pestanasEstado" style="margin-bottom: 14px;">
+          <button class="pestana activa" data-estado="pendiente" type="button">⏳ Pendientes</button>
+          <button class="pestana" data-estado="aprobada" type="button">✅ Aprobadas</button>
+          <button class="pestana" data-estado="rechazada" type="button">❌ Rechazadas</button>
+        </div>
+        <div class="filtros">
+          <div class="campo">
+            <label>Filtrar por fecha de registro</label>
+            <input type="date" id="filtroFecha">
+          </div>
+          <div class="campo">
+            <label>Buscar DNI</label>
+            <input type="text" id="filtroDni" maxlength="8" placeholder="DNI">
+          </div>
+          <button class="btn btn-gris" id="btnLimpiarFiltros" type="button">Limpiar</button>
+          <button class="btn btn-gris" id="btnActualizarSolicitudes" type="button">🔄 Actualizar</button>
+        </div>
+        <div class="lista-solicitudes" id="listaSolicitudes"></div>
+        <p id="sinResultados" class="texto-centrado oculto" style="color: var(--gris); padding: 20px;">
+          No hay solicitudes con estos filtros.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== LISTADO PARA DIGITADOR (residente/digitador) ===== -->
+    <section id="seccionListado" class="oculto">
+      <div class="tarjeta">
+        <h2>Listado de citas aprobadas — para citar en ESSI</h2>
+        <div class="filtros">
+          <div class="campo">
+            <label>Desde (aprobada el)</label>
+            <input type="date" id="listadoDesde">
+          </div>
+          <div class="campo">
+            <label>Hasta (aprobada el)</label>
+            <input type="date" id="listadoHasta">
+          </div>
+          <div class="campo">
+            <label>Tipo de examen</label>
+            <select id="listadoTipo">
+              <option value="">Todos</option>
+            </select>
+          </div>
+          <button class="btn btn-primario" id="btnListadoPdf" type="button">⬇️ Descargar listado (PDF)</button>
+        </div>
+        <div class="tabla-responsiva">
+          <table class="tabla" id="tablaListado">
+            <thead>
+              <tr>
+                <th>N°</th><th>DNI</th><th>Paciente</th><th>Examen</th><th>Fecha cita</th><th>Hora</th><th>Aprobada el</th><th>Contacto</th><th>Documento</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="listadoVacio" class="texto-centrado oculto" style="color: var(--gris); padding: 20px;">
+          No hay citas aprobadas en el rango seleccionado.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== USUARIOS (admin) ===== -->
+    <section id="seccionUsuarios" class="oculto">
+      <div class="tarjeta">
+        <h2>Crear usuario</h2>
+        <div class="rejilla">
+          <div class="campo campo-obligatorio">
+            <label>Nombre completo</label>
+            <input type="text" id="usrNombre" placeholder="Dr(a). Apellidos, Nombres">
+          </div>
+          <div class="campo campo-obligatorio">
+            <label>Usuario (único, sin espacios)</label>
+            <input type="text" id="usrUsuario" placeholder="Ej: residente01">
+          </div>
+          <div class="campo campo-obligatorio">
+            <label>Clave</label>
+            <input type="text" id="usrPassword" placeholder="Mínimo 4 caracteres">
+          </div>
+          <div class="campo campo-obligatorio">
+            <label>Rol</label>
+            <select id="usrRol">
+              <option value="residente">Residente de radiología</option>
+              <option value="digitador">Digitador ESSI</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+        </div>
+        <div id="alertaUsuario" class="alerta"></div>
+        <button class="btn btn-primario" id="btnCrearUsuario" type="button">Crear usuario</button>
+      </div>
+      <div class="tarjeta">
+        <h2>Usuarios del sistema</h2>
+        <div class="tabla-responsiva">
+          <table class="tabla" id="tablaUsuarios">
+            <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== INDICACIONES (admin) ===== -->
+    <section id="seccionIndicaciones" class="oculto">
+      <div class="tarjeta">
+        <h2>Nueva indicación pregrabada</h2>
+        <div class="rejilla">
+          <div class="campo campo-obligatorio">
+            <label>Tipo de examen</label>
+            <select id="indTipo"></select>
+          </div>
+          <div class="campo campo-obligatorio">
+            <label>Texto de la indicación</label>
+            <textarea id="indTexto" rows="3" placeholder="Ej: Ayuno de 6 horas. Traer estudios previos…"></textarea>
+          </div>
+        </div>
+        <div id="alertaIndicacion" class="alerta"></div>
+        <button class="btn btn-primario" id="btnGuardarIndicacion" type="button">Guardar indicación</button>
+      </div>
+      <div class="tarjeta">
+        <h2>Indicaciones registradas</h2>
+        <div class="lista-solicitudes" id="listaIndicaciones"></div>
+      </div>
+    </section>
+
+    <!-- ===== QR DE VENTANILLA (admin) ===== -->
+    <section id="seccionQr" class="oculto">
+      <div class="tarjeta texto-centrado">
+        <h2>QR para la ventanilla de Rayos X</h2>
+        <p style="color: var(--gris); font-size: .9rem; margin-bottom: 14px;">
+          Imprime este código y colócalo en ventanilla para que los pacientes accedan al portal.
+        </p>
+        <div class="qr-caja" id="qrCaja"></div>
+        <p class="mt" style="font-size: .82rem; color: var(--gris);" id="qrUrlTexto"></p>
+        <button class="btn btn-gris mt" id="btnImprimirQr" type="button">🖨️ Imprimir QR</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ MODAL APROBAR ============ -->
+<div class="modal-fondo" id="modalAprobar">
+  <div class="modal">
+    <h3>✅ Aprobar y programar cita</h3>
+    <p style="font-size: .9rem; color: var(--gris); margin-bottom: 12px;" id="aprResumen"></p>
+    <div class="campo campo-obligatorio">
+      <label>Nombre del paciente (opcional, para el listado)</label>
+      <input type="text" id="aprPaciente" placeholder="Apellidos, Nombres">
+    </div>
+    <div class="rejilla">
+      <div class="campo campo-obligatorio">
+        <label>Tipo de examen</label>
+        <select id="aprTipo"></select>
+      </div>
+      <div class="campo campo-obligatorio">
+        <label>Fecha de cita</label>
+        <input type="date" id="aprFecha">
+      </div>
+      <div class="campo campo-obligatorio">
+        <label>Hora de cita</label>
+        <input type="time" id="aprHora">
+      </div>
+    </div>
+    <div class="campo">
+      <label>Indicación pregrabada</label>
+      <select id="aprIndicacionSelect"><option value="">— Elegir para autocompletar —</option></select>
+    </div>
+    <div class="campo campo-obligatorio">
+      <label>Indicaciones para el paciente (editables)</label>
+      <textarea id="aprIndicaciones" rows="4" placeholder="Indicaciones que verá el paciente…"></textarea>
+    </div>
+    <div class="botones-modal">
+      <button class="btn btn-gris" id="aprCancelar" type="button">Cancelar</button>
+      <button class="btn btn-verde" id="aprConfirmar" type="button">Confirmar cita</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL RECHAZAR ============ -->
+<div class="modal-fondo" id="modalRechazar">
+  <div class="modal">
+    <h3>❌ Rechazar solicitud</h3>
+    <p style="font-size: .9rem; color: var(--gris); margin-bottom: 12px;" id="recResumen"></p>
+    <div class="campo campo-obligatorio">
+      <label>Observaciones (las verá el paciente al consultar con su DNI)</label>
+      <textarea id="recObservaciones" rows="4" placeholder="Ej: La solicitud está ilegible, vuelva a subirla…"></textarea>
+    </div>
+    <div class="botones-modal">
+      <button class="btn btn-gris" id="recCancelar" type="button">Cancelar</button>
+      <button class="btn btn-rojo" id="recConfirmar" type="button">Rechazar solicitud</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/panel.js"></script>
+</body>
+</html>
