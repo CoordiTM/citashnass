@@ -322,14 +322,16 @@ async function cargarIndicacionesSelect(tipo) {
   const sel = $("aprIndicacionSelect");
   sel.innerHTML = '<option value="">— Elegir para autocompletar —</option>';
   if (!tipo) return;
-  const snap = await get(ref(db, `indicaciones/${tipo}`));
-  if (snap.exists()) {
-    snap.val().forEach((texto, i) => {
+  try {
+    const lista = await leerIndicacionesTipo(tipo);
+    lista.forEach((texto, i) => {
       const op = document.createElement("option");
       op.value = i;
       op.textContent = texto.length > 70 ? texto.slice(0, 70) + "…" : texto;
       sel.appendChild(op);
     });
+  } catch (err) {
+    console.error("Error al cargar indicaciones:", err);
   }
 }
 
@@ -352,9 +354,11 @@ $("aprIndicacionSelect").addEventListener("change", async (e) => {
   const tipo = $("aprTipo").value;
   const idx = e.target.value;
   if (tipo === "" || idx === "") return;
-  const snap = await get(ref(db, `indicaciones/${tipo}`));
-  if (snap.exists() && snap.val()[idx] !== undefined) {
-    $("aprIndicaciones").value = snap.val()[idx];
+  try {
+    const lista = await leerIndicacionesTipo(tipo);
+    if (lista[idx] !== undefined) $("aprIndicaciones").value = lista[idx];
+  } catch (err) {
+    console.error("Error al cargar indicación:", err);
   }
 });
 
@@ -667,6 +671,21 @@ function llenarSelectIndicacionesAdmin() {
 }
 llenarSelectIndicacionesAdmin();
 
+async function leerIndicacionesTipo(tipo) {
+  const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  const data = await resp.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function guardarListaIndicaciones(tipo, lista) {
+  const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`, {
+    method: "PUT",
+    body: JSON.stringify(lista || [])
+  });
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+}
+
 $("btnGuardarIndicacion").addEventListener("click", async () => {
   const tipo = $("indTipo").value;
   const texto = $("indTexto").value.trim();
@@ -674,12 +693,11 @@ $("btnGuardarIndicacion").addEventListener("click", async () => {
   const btn = $("btnGuardarIndicacion");
   btn.disabled = true;
   try {
-    const snap = await get(ref(db, `indicaciones/${tipo}`));
-    const lista = snap.exists() ? snap.val() : [];
+    const lista = await leerIndicacionesTipo(tipo);
     lista.push(texto);
-    await set(ref(db, `indicaciones/${tipo}`), lista);
+    await guardarListaIndicaciones(tipo, lista);
     $("indTexto").value = "";
-    alerta("alertaIndicacion", "ok", "✅ Indicación guardada.");
+    alerta("alertaIndicacion", "ok", `✅ Indicación agregada a «${TIPOS_EXAMEN[tipo]}».`);
     cargarIndicaciones();
   } catch (err) {
     console.error(err);
@@ -692,34 +710,65 @@ $("btnGuardarIndicacion").addEventListener("click", async () => {
 async function cargarIndicaciones() {
   const contenedor = $("listaIndicaciones");
   contenedor.innerHTML = "";
-  const snap = await get(ref(db, "indicaciones"));
-  if (!snap.exists()) {
+  let data = null;
+  try {
+    const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones.json`);
+    if (resp.ok) data = await resp.json();
+  } catch (err) {
+    console.error(err);
+  }
+  if (!data) {
     contenedor.innerHTML = '<p class="texto-centrado" style="color: var(--gris);">Aún no hay indicaciones registradas.</p>';
     return;
   }
-  snap.forEach((child) => {
-    const lista = child.val();
+  // Desglose por examen, en el orden definido en TIPOS_EXAMEN
+  let hayAlgo = false;
+  Object.entries(TIPOS_EXAMEN).forEach(([tipo, nombre]) => {
+    const lista = Array.isArray(data[tipo]) ? data[tipo] : [];
+    if (!lista.length) return;
+    hayAlgo = true;
+    const titulo = document.createElement("h3");
+    titulo.style.cssText = "margin: 14px 0 8px; color: var(--azul-oscuro); font-size: .95rem;";
+    titulo.textContent = `🩻 ${nombre} (${lista.length})`;
+    contenedor.appendChild(titulo);
     lista.forEach((texto, i) => {
       const item = document.createElement("div");
       item.className = "solicitud-item";
       item.innerHTML = `
         <div class="datos">
-          <span class="etiqueta etiqueta-tipo">${TIPOS_EXAMEN[child.key] || child.key}</span>
-          <div class="meta" style="margin-top: 6px; white-space: pre-wrap;">${escapar(texto)}</div>
+          <div class="meta" style="white-space: pre-wrap;">${escapar(texto)}</div>
         </div>
         <div class="acciones">
-          <button class="btn btn-rojo btn-chico" data-borrar="${child.key}|${i}" type="button">🗑️ Eliminar</button>
+          <button class="btn btn-gris btn-chico" data-editar="${tipo}|${i}" type="button">✏️ Editar</button>
+          <button class="btn btn-rojo btn-chico" data-borrar="${tipo}|${i}" type="button">🗑️ Eliminar</button>
         </div>`;
       contenedor.appendChild(item);
     });
   });
+  if (!hayAlgo) {
+    contenedor.innerHTML = '<p class="texto-centrado" style="color: var(--gris);">Aún no hay indicaciones registradas.</p>';
+    return;
+  }
+  contenedor.querySelectorAll("[data-editar]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const [tipo, idx] = b.dataset.editar.split("|");
+      const lista = await leerIndicacionesTipo(tipo);
+      const actual = lista[Number(idx)] || "";
+      const nuevo = prompt("Edita la indicación (el residente podrá ajustarla aún más al aprobar):", actual);
+      if (nuevo === null) return;
+      if (!nuevo.trim()) return alert("La indicación no puede quedar vacía.");
+      if (nuevo.trim() === actual) return;
+      if (!confirm("¿Guardar los cambios de esta indicación?")) return;
+      lista[Number(idx)] = nuevo.trim();
+      await guardarListaIndicaciones(tipo, lista);
+      cargarIndicaciones();
+    }));
   contenedor.querySelectorAll("[data-borrar]").forEach((b) =>
     b.addEventListener("click", async () => {
       const [tipo, idx] = b.dataset.borrar.split("|");
       if (!confirm("¿Eliminar esta indicación pregrabada?")) return;
-      const snapI = await get(ref(db, `indicaciones/${tipo}`));
-      const lista = snapI.val().filter((_, i) => i !== Number(idx));
-      await set(ref(db, `indicaciones/${tipo}`), lista);
+      const lista = (await leerIndicacionesTipo(tipo)).filter((_, i) => i !== Number(idx));
+      await guardarListaIndicaciones(tipo, lista);
       cargarIndicaciones();
     }));
 }
