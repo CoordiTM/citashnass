@@ -9,7 +9,7 @@ import {
   formatearFechaHora, tipoExamenTexto, esPdf, fechaHoy,
   NOMBRE_HOSPITAL, NOMBRE_SERVICIO, TIPOS_EXAMEN, ROLES
 } from "./db.js";
-import { SITE_URL } from "./config.js";
+import { firebaseConfig, SITE_URL } from "./config.js";
 
 const $ = (id) => document.getElementById(id);
 const SESION_KEY = "citas_rx_sesion";
@@ -171,19 +171,27 @@ function cargarSeccion(clave) {
 // ============================================================
 //  SOLICITUDES (residente)
 // ============================================================
+let ultimoErrorCarga = "";
+
 async function cargarSolicitudes() {
   try {
-    const snap = await get(ref(db, "solicitudes"));
+    // Lectura directa por HTTP: funciona aunque la red corte el WebSocket
+    // que usa el SDK de Firebase (la misma URL .json que abriste en el navegador).
+    const resp = await fetch(`${firebaseConfig.databaseURL}/solicitudes.json`);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
     solicitudesCache = [];
-    snap.forEach((child) => solicitudesCache.push({ id: child.key, ...child.val() }));
+    if (data) {
+      Object.entries(data).forEach(([id, valor]) => solicitudesCache.push({ id, ...valor }));
+    }
     solicitudesCache.sort((a, b) => (b.creadoEl || "").localeCompare(a.creadoEl || ""));
+    ultimoErrorCarga = "";
     if (!$("seccionSolicitudes").classList.contains("oculto")) renderSolicitudes();
     if (!$("seccionListado").classList.contains("oculto")) cargarListado();
   } catch (err) {
-    console.error("Error al cargar solicitudes:", err);
-    const caja = $("sinResultados");
-    caja.textContent = "⚠️ Error al cargar solicitudes: " + (err && err.message ? err.message : String(err)) + " — presiona F12 y revisa la consola para más detalle.";
-    caja.classList.remove("oculto");
+    ultimoErrorCarga = "⚠️ Error al cargar solicitudes: " + (err && err.message ? err.message : String(err));
+    console.error(ultimoErrorCarga, err);
+    if (!$("seccionSolicitudes").classList.contains("oculto")) renderSolicitudes();
   }
 }
 
@@ -229,6 +237,11 @@ function renderSolicitudes() {
   });
 
   $("sinResultados").classList.toggle("oculto", filtradas.length > 0);
+  if (filtradas.length === 0) {
+    $("sinResultados").textContent = ultimoErrorCarga
+      ? ultimoErrorCarga + " — revisa F12 → Consola para más detalle."
+      : "No hay solicitudes con estos filtros.";
+  }
 
   filtradas.forEach((s) => {
     const item = document.createElement("div");
