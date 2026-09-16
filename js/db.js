@@ -33,31 +33,79 @@ export async function subirArchivo(archivo) {
   return await resp.json(); // { secure_url, public_id, ... }
 }
 
-// ---------- Sello de fecha y hora (aparece SOLO en la descarga) ----------
-export function textoSello(sol) {
-  return `CITA: ${sol.fecha} ${sol.hora} - ${NOMBRE_SERVICIO}`;
+// ---------- Sello de la cita (aparece SOLO en la descarga) ----------
+// Líneas del sello: fecha/hora grande + DNI/servicio + indicaciones envueltas.
+function envolverTexto(texto, ancho) {
+  const palabras = texto.split(/\s+/);
+  const lineas = [];
+  let linea = "";
+  palabras.forEach((p) => {
+    if ((linea + " " + p).trim().length > ancho) {
+      lineas.push(linea.trim());
+      linea = p;
+    } else {
+      linea = (linea + " " + p).trim();
+    }
+  });
+  if (linea) lineas.push(linea);
+  return lineas;
+}
+
+export function lineasSello(sol) {
+  const lineas = [`CITA: ${sol.fecha} ${sol.hora}`];
+  lineas.push(`DNI ${sol.dni} · ${NOMBRE_SERVICIO}`);
+  const indicaciones = (sol.indicaciones || "").trim();
+  if (indicaciones) {
+    lineas.push("INDICACIONES:");
+    const envueltas = envolverTexto(indicaciones, 42);
+    const MAX = 6;
+    envueltas.slice(0, MAX).forEach((l, i) => {
+      lineas.push(i === MAX - 1 && envueltas.length > MAX ? l + " …" : l);
+    });
+  }
+  return lineas;
 }
 
 // Imagen: Cloudinary genera el sello como transformación sobre la copia
-export function urlImagenSellada(publicId, sello) {
-  const texto = encodeURIComponent(sello).replace(/'/g, "%27");
-  const transformacion = `l_text:Arial_28_bold:${texto},co_rgb:ffffff,b_rgb:1e429f,g_south,y_24,x_24`;
+export function urlImagenSellada(publicId, lineas) {
+  // Cloudinary no acepta comas (",") ni barras ("/") dentro del texto del sello:
+  // las reemplazamos por caracteres que sí renderiza.
+  const textoSeguro = lineas
+    .join("\n")
+    .replace(/,/g, " · ")
+    .replace(/\//g, "-");
+  const texto = encodeURIComponent(textoSeguro).replace(/'/g, "%27");
+  const transformacion = `l_text:Arial_76_bold:${texto},co_rgb:ffffff,b_rgb:1e429f,g_south,y_40,x_20`;
   return `https://res.cloudinary.com/${cloudinaryConfig.cloudName}/image/upload/${transformacion}/${publicId}.jpg`;
 }
 
-// PDF: se estampa en el navegador con pdf-lib antes de descargar
-export async function descargarPdfSellado(urlOriginal, sello, nombreArchivo) {
+// PDF: se estampa una banda inferior en el navegador con pdf-lib antes de descargar
+export async function descargarPdfSellado(urlOriginal, lineas, nombreArchivo) {
   const resp = await fetch(urlOriginal);
   const bytes = await resp.arrayBuffer();
   const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+  const fuente = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const fuenteNegrita = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
   const paginas = pdfDoc.getPages();
-  paginas.forEach(pagina => {
-    const { width, height } = pagina.getSize();
+  paginas.forEach((pagina) => {
+    const { width } = pagina.getSize();
+    const altoLinea = 28, margenX = 24, padding = 20;
+    const altoCaja = padding * 2 + 40 + (lineas.length - 1) * altoLinea;
     pagina.drawRectangle({
-      x: 24, y: height - 46, width: Math.min(width - 48, sello.length * 8.2 + 24), height: 30,
-      color: PDFLib.rgb(0.118, 0.259, 0.624), opacity: 0.92
+      x: 0, y: 0, width, height: altoCaja,
+      color: PDFLib.rgb(0.118, 0.259, 0.624), opacity: 0.95
     });
-    pagina.drawText(sello, { x: 36, y: height - 36, size: 13, color: PDFLib.rgb(1, 1, 1) });
+    let y = altoCaja - padding - 28;
+    lineas.forEach((linea, i) => {
+      const titular = i === 0;
+      pagina.drawText(linea, {
+        x: margenX, y,
+        size: titular ? 36 : 21,
+        font: titular ? fuenteNegrita : fuente,
+        color: PDFLib.rgb(1, 1, 1)
+      });
+      y -= titular ? 44 : altoLinea;
+    });
   });
   const nuevo = await pdfDoc.save();
   const blob = new Blob([nuevo], { type: "application/pdf" });
