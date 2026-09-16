@@ -126,8 +126,9 @@ $("btnSetup").addEventListener("click", async () => {
 });
 
 function seccionPorDefecto() {
-  if (rolActual === "admin") return "usuarios";
-  return "solicitudes";
+  // La primera sección que su rol puede ver (el digitador NUNCA ve solicitudes)
+  const disponibles = Object.entries(SECCIONES).filter(([, cfg]) => cfg.roles.includes(rolActual));
+  return disponibles.length ? disponibles[0][0] : "solicitudes";
 }
 
 // ============================================================
@@ -156,6 +157,10 @@ function construirNavegacion() {
 }
 
 function cargarSeccion(clave) {
+  // Candado: si el rol no tiene permiso para esta sección, ir a la suya
+  if (!SECCIONES[clave] || !SECCIONES[clave].roles.includes(rolActual)) {
+    clave = seccionPorDefecto();
+  }
   document.querySelectorAll("#navegacionRoles .pestana").forEach((b) =>
     b.classList.toggle("activa", b.dataset.seccion === clave));
   Object.keys(SECCIONES).forEach((s) =>
@@ -224,6 +229,7 @@ $("btnLimpiarFiltros").addEventListener("click", () => {
 $("btnActualizarSolicitudes").addEventListener("click", cargarSolicitudes);
 
 function renderSolicitudes() {
+  if (rolActual === "digitador") return; // doble candado: el digitador jamás ve solicitudes
   const lista = $("listaSolicitudes");
   lista.innerHTML = "";
   const fFecha = $("filtroFecha").value;
