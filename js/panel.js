@@ -181,6 +181,9 @@ async function cargarSolicitudes() {
     if (!$("seccionListado").classList.contains("oculto")) cargarListado();
   } catch (err) {
     console.error("Error al cargar solicitudes:", err);
+    const caja = $("sinResultados");
+    caja.textContent = "⚠️ Error al cargar solicitudes: " + (err && err.message ? err.message : String(err)) + " — presiona F12 y revisa la consola para más detalle.";
+    caja.classList.remove("oculto");
   }
 }
 
