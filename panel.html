@@ -77,7 +77,8 @@
       <div class="tarjeta">
         <div class="pestanas" id="pestanasEstado" style="margin-bottom: 14px;">
           <button class="pestana activa" data-estado="pendiente" type="button">⏳ Pendientes</button>
-          <button class="pestana" data-estado="aprobada" type="button">✅ Aprobadas</button>
+          <button class="pestana" data-estado="validada" type="button">🕐 Validadas</button>
+          <button class="pestana" data-estado="citada" type="button">✅ Citadas</button>
           <button class="pestana" data-estado="rechazada" type="button">❌ Rechazadas</button>
         </div>
         <div class="filtros">
@@ -95,6 +96,21 @@
         <div class="lista-solicitudes" id="listaSolicitudes"></div>
         <p id="sinResultados" class="texto-centrado oculto" style="color: var(--gris); padding: 20px;">
           No hay solicitudes con estos filtros.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== POR CITAR (digitador/admin): validadas sin fecha ===== -->
+    <section id="seccionPorCitar" class="oculto">
+      <div class="tarjeta">
+        <h2>📅 Solicitudes por citar</h2>
+        <p style="color: var(--gris); font-size: .88rem; margin-bottom: 12px;">
+          Ecografías y biopsias que el residente ya validó. Asigna aquí la fecha y la hora;
+          al confirmar, la cita pasará al Listado ESSI y el paciente podrá verla y descargarla.
+        </p>
+        <div class="lista-solicitudes" id="listaPorCitar"></div>
+        <p id="porCitarVacio" class="texto-centrado" style="color: var(--gris); padding: 20px;">
+          No hay solicitudes esperando fecha.
         </p>
       </div>
     </section>
@@ -120,11 +136,12 @@
           </div>
           <button class="btn btn-primario" id="btnListadoPdf" type="button">⬇️ Descargar listado (PDF)</button>
         </div>
+        <p id="listadoContador" style="color: var(--azul-oscuro); font-size: .9rem; font-weight: 600; margin-bottom: 8px;"></p>
         <div class="tabla-responsiva">
           <table class="tabla" id="tablaListado">
             <thead>
               <tr>
-                <th>N°</th><th>DNI</th><th>Paciente</th><th>Examen</th><th>Fecha cita</th><th>Hora</th><th>Aprobada el</th><th>Contacto</th><th>Documento</th>
+                <th>N°</th><th>DNI</th><th>Paciente</th><th>Examen</th><th>Fecha cita</th><th>Hora</th><th>Aprobada el</th><th>Contacto</th><th>Cargado en ESSI</th><th>Documento</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -181,13 +198,17 @@
       <div class="tarjeta">
         <h2>Nueva indicación pregrabada</h2>
         <p style="color: var(--gris); font-size: .85rem; margin-bottom: 12px;">
-          Cada examen tiene sus propias indicaciones. El residente las selecciona al aprobar una cita
+          Cada estudio tiene sus propias indicaciones. El residente las selecciona al aprobar una cita
           y puede ajustarlas para cada paciente antes de confirmar.
         </p>
         <div class="rejilla">
           <div class="campo campo-obligatorio">
             <label>Tipo de examen</label>
             <select id="indTipo"></select>
+          </div>
+          <div class="campo campo-obligatorio oculto" id="campoIndEstudio">
+            <label>Estudio específico</label>
+            <select id="indEstudio"></select>
           </div>
           <div class="campo campo-obligatorio">
             <label>Texto de la indicación</label>
@@ -200,6 +221,32 @@
       <div class="tarjeta">
         <h2>Indicaciones registradas</h2>
         <div class="lista-solicitudes" id="listaIndicaciones"></div>
+      </div>
+    </section>
+
+    <!-- ===== ESTUDIOS CONTRASTADOS (admin) ===== -->
+    <section id="seccionEstudios" class="oculto">
+      <div class="tarjeta">
+        <h2>Estudios contrastados</h2>
+        <p style="color: var(--gris); font-size: .85rem; margin-bottom: 12px;">
+          Lista de estudios que el residente podrá elegir al aprobar un examen contrastado
+          (HSG, esofagograma, cistografía…). Cada estudio tiene sus propias indicaciones.
+        </p>
+        <div class="rejilla">
+          <div class="campo campo-obligatorio">
+            <label>Nombre del estudio</label>
+            <input type="text" id="estNombre" placeholder="Ej: HSG">
+          </div>
+        </div>
+        <div id="alertaEstudio" class="alerta"></div>
+        <button class="btn btn-primario" id="btnAgregarEstudio" type="button">➕ Agregar estudio</button>
+      </div>
+      <div class="tarjeta">
+        <h2>Estudios registrados</h2>
+        <div class="lista-solicitudes" id="listaEstudios"></div>
+        <p id="estudiosVacio" class="texto-centrado oculto" style="color: var(--gris); padding: 20px;">
+          Aún no hay estudios registrados. Agrega el primero arriba (ej: HSG).
+        </p>
       </div>
     </section>
 
@@ -221,7 +268,7 @@
 <!-- ============ MODAL APROBAR ============ -->
 <div class="modal-fondo" id="modalAprobar">
   <div class="modal">
-    <h3>✅ Aprobar y programar cita</h3>
+    <h3>✅ Revisar solicitud</h3>
     <p style="font-size: .9rem; color: var(--gris); margin-bottom: 12px;" id="aprResumen"></p>
     <div class="campo campo-obligatorio">
       <label>Nombre del paciente (opcional, para el listado)</label>
@@ -232,15 +279,23 @@
         <label>Tipo de examen</label>
         <select id="aprTipo"></select>
       </div>
-      <div class="campo campo-obligatorio">
+      <div class="campo campo-obligatorio oculto" id="campoEstudio">
+        <label>Estudio específico</label>
+        <select id="aprEstudio"></select>
+      </div>
+      <div class="campo campo-obligatorio oculto" id="campoFecha">
         <label>Fecha de cita</label>
         <input type="date" id="aprFecha">
       </div>
-      <div class="campo campo-obligatorio">
+      <div class="campo campo-obligatorio oculto" id="campoHora">
         <label>Hora de cita</label>
         <input type="time" id="aprHora">
       </div>
     </div>
+    <p id="aprAvisoDigitador" class="oculto" style="font-size: .85rem; color: var(--azul-oscuro); background: #eaf1ff; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+      ℹ️ Las ecografías y biopsias no llevan fecha aquí: al validar, pasarán a la sección
+      <strong>«Por citar»</strong> del digitador, quien les asignará fecha y hora.
+    </p>
     <div class="campo">
       <label>Indicación pregrabada</label>
       <select id="aprIndicacionSelect"><option value="">— Elegir para autocompletar —</option></select>
@@ -252,6 +307,28 @@
     <div class="botones-modal">
       <button class="btn btn-gris" id="aprCancelar" type="button">Cancelar</button>
       <button class="btn btn-verde" id="aprConfirmar" type="button">Confirmar cita</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL CITAR (digitador) ============ -->
+<div class="modal-fondo" id="modalCitar">
+  <div class="modal">
+    <h3 id="citTitulo">📅 Asignar fecha y hora de la cita</h3>
+    <p style="font-size: .9rem; color: var(--gris); margin-bottom: 12px;" id="citResumen"></p>
+    <div class="rejilla">
+      <div class="campo campo-obligatorio">
+        <label>Fecha de cita</label>
+        <input type="date" id="citFecha">
+      </div>
+      <div class="campo campo-obligatorio">
+        <label>Hora de cita</label>
+        <input type="time" id="citHora">
+      </div>
+    </div>
+    <div class="botones-modal">
+      <button class="btn btn-gris" id="citCancelar" type="button">Cancelar</button>
+      <button class="btn btn-verde" id="citConfirmar" type="button">Confirmar cita</button>
     </div>
   </div>
 </div>
