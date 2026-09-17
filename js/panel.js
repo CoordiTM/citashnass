@@ -5,9 +5,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import {
   db, set, hashClave,
-  urlImagenSellada, descargarPdfSellado, descargarUrl, lineasSello,
-  formatearFechaHora, tipoExamenTexto, esPdf, fechaHoy,
-  NOMBRE_HOSPITAL, NOMBRE_SERVICIO, TIPOS_EXAMEN, ROLES
+  generarPdfSellado, mostrarVistaPrevia, nombreExamen, esCitada,
+  formatearFechaHora, tipoExamenTexto, fechaHoy,
+  NOMBRE_HOSPITAL, NOMBRE_SERVICIO, TIPOS_EXAMEN, TIPO_CITA_RESIDENTE, ROLES
 } from "./db.js";
 import { firebaseConfig, SITE_URL } from "./config.js";
 
@@ -20,6 +20,7 @@ let estadoFiltro = "pendiente";
 let solicitudesCache = [];
 let idAprobando = null;
 let idRechazando = null;
+let idCitando = null;
 
 // ============================================================
 //  SESIÓN (usuario + clave, sin Firebase Auth)
@@ -139,9 +140,11 @@ function seccionPorDefecto() {
 // ============================================================
 const SECCIONES = {
   solicitudes: { titulo: "📋 Solicitudes", roles: ["residente", "admin"] },
+  porCitar: { titulo: "📅 Por citar", roles: ["digitador", "admin"] },
   listado: { titulo: "🖨️ Listado ESSI", roles: ["residente", "digitador", "admin"] },
   usuarios: { titulo: "👥 Usuarios", roles: ["admin"] },
   indicaciones: { titulo: "📌 Indicaciones", roles: ["admin"] },
+  estudios: { titulo: "🩻 Estudios", roles: ["admin"] },
   qr: { titulo: "🔳 QR ventanilla", roles: ["admin"] }
 };
 
@@ -170,9 +173,15 @@ function cargarSeccion(clave) {
     $(`seccion${s[0].toUpperCase()}${s.slice(1)}`).classList.toggle("oculto", s !== clave));
 
   if (clave === "solicitudes") renderSolicitudes();
+  if (clave === "porCitar") renderPorCitar();
   if (clave === "listado") cargarListado();
   if (clave === "usuarios") cargarUsuarios();
-  if (clave === "indicaciones") cargarIndicaciones();
+  if (clave === "indicaciones") {
+    $("campoIndEstudio").classList.toggle("oculto", $("indTipo").value !== TIPO_CITA_RESIDENTE);
+    llenarSelectEstudiosIndicaciones();
+    cargarIndicaciones();
+  }
+  if (clave === "estudios") cargarEstudios();
   if (clave === "qr") generarQr();
 }
 
@@ -195,6 +204,7 @@ async function cargarSolicitudes() {
     solicitudesCache.sort((a, b) => (b.creadoEl || "").localeCompare(a.creadoEl || ""));
     ultimoErrorCarga = "";
     if (!$("seccionSolicitudes").classList.contains("oculto")) renderSolicitudes();
+    if (!$("seccionPorCitar").classList.contains("oculto")) renderPorCitar();
     if (!$("seccionListado").classList.contains("oculto")) cargarListado();
   } catch (err) {
     ultimoErrorCarga = "⚠️ Error al cargar solicitudes: " + (err && err.message ? err.message : String(err));
@@ -239,7 +249,7 @@ function renderSolicitudes() {
   const fDni = $("filtroDni").value.trim();
 
   const filtradas = solicitudesCache.filter((s) => {
-    if (s.estado !== estadoFiltro) return false;
+    if (estadoFiltro === "citada" ? !esCitada(s) : s.estado !== estadoFiltro) return false;
     if (fFecha && (s.creadoEl || "").slice(0, 10) !== fFecha) return false;
     if (fDni && !s.dni.startsWith(fDni)) return false;
     return true;
@@ -257,13 +267,18 @@ function renderSolicitudes() {
     item.className = "solicitud-item";
     const etiquetaEstado = {
       pendiente: '<span class="etiqueta etiqueta-pendiente">Pendiente</span>',
-      aprobada: '<span class="etiqueta etiqueta-aprobada">Aprobada</span>',
+      validada: '<span class="etiqueta etiqueta-validada">Validada — por citar</span>',
+      citada: '<span class="etiqueta etiqueta-aprobada">Citada</span>',
+      aprobada: '<span class="etiqueta etiqueta-aprobada">Citada</span>',
       rechazada: '<span class="etiqueta etiqueta-rechazada">Rechazada</span>'
     }[s.estado];
 
     let detalleExtra = "";
-    if (s.estado === "aprobada") {
-      detalleExtra = `<br>📅 <strong>${s.fecha} ${s.hora}</strong> · ${tipoExamenTexto(s.tipo)}${s.paciente ? " · " + escapar(s.paciente) : ""}`;
+    if (esCitada(s)) {
+      detalleExtra = `<br>📅 <strong>${s.fecha} ${s.hora}</strong> · ${nombreExamen(s)}${s.paciente ? " · " + escapar(s.paciente) : ""}${s.citadaPor ? ` · Citada por ${escapar(s.citadaPor)}` : ""}`;
+    }
+    if (s.estado === "validada") {
+      detalleExtra = `<br>🩻 ${nombreExamen(s)}${s.paciente ? " · " + escapar(s.paciente) : ""} — ⏳ esperando que digitación asigne fecha y hora`;
     }
     if (s.estado === "rechazada") {
       detalleExtra = `<br>Observación: ${escapar(s.observaciones || "-")}`;
@@ -281,9 +296,9 @@ function renderSolicitudes() {
       <div class="acciones">
         <button class="btn btn-gris btn-chico" data-ver="${s.id}" type="button">👁️ Ver solicitud</button>
         ${s.estado === "pendiente" && rolActual !== "digitador" ? `
-          <button class="btn btn-verde btn-chico" data-aprobar="${s.id}" type="button">✅ Aprobar</button>
+          <button class="btn btn-verde btn-chico" data-aprobar="${s.id}" type="button">✅ Revisar</button>
           <button class="btn btn-rojo btn-chico" data-rechazar="${s.id}" type="button">❌ Rechazar</button>` : ""}
-        ${s.estado === "aprobada" ? `
+        ${esCitada(s) ? `
           <button class="btn btn-gris btn-chico" data-sello="${s.id}" type="button">⬇️ Con sello</button>` : ""}
       </div>`;
     lista.appendChild(item);
@@ -321,12 +336,41 @@ function llenarSelectTipos(selectId) {
   });
 }
 
-async function cargarIndicacionesSelect(tipo) {
+async function llenarSelectEstudios() {
+  const sel = $("aprEstudio");
+  sel.innerHTML = '<option value="">— Seleccionar estudio —</option>';
+  try {
+    const estudios = await leerEstudios();
+    estudios.forEach((texto) => {
+      const op = document.createElement("option");
+      op.value = texto;
+      op.textContent = texto;
+      sel.appendChild(op);
+    });
+  } catch (err) {
+    console.error("Error al cargar estudios:", err);
+  }
+}
+
+// Según el tipo elegido, el modal cambia:
+//  - contraste → pide estudio específico + fecha y hora (el residente cita)
+//  - eco/biopsia → sin fecha ni hora (el digitador citará después): «Validar»
+function actualizarModalAprobar() {
+  const tipo = $("aprTipo").value;
+  const esContraste = tipo === TIPO_CITA_RESIDENTE;
+  $("campoEstudio").classList.toggle("oculto", !esContraste);
+  $("campoFecha").classList.toggle("oculto", !esContraste);
+  $("campoHora").classList.toggle("oculto", !esContraste);
+  $("aprAvisoDigitador").classList.toggle("oculto", !tipo || esContraste);
+  $("aprConfirmar").textContent = esContraste ? "Confirmar cita" : "Validar solicitud";
+}
+
+async function cargarIndicacionesSelect(tipo, estudio) {
   const sel = $("aprIndicacionSelect");
   sel.innerHTML = '<option value="">— Elegir para autocompletar —</option>';
   if (!tipo) return;
   try {
-    const lista = await leerIndicacionesTipo(tipo);
+    const lista = await leerIndicacionesTipo(tipo, estudio);
     lista.forEach((texto, i) => {
       const op = document.createElement("option");
       op.value = i;
@@ -343,22 +387,30 @@ function abrirAprobar(id) {
   if (!s) return;
   idAprobando = id;
   llenarSelectTipos("aprTipo");
+  llenarSelectEstudios();
   $("aprPaciente").value = s.paciente || "";
   $("aprFecha").value = s.fecha || fechaHoy();
   $("aprHora").value = s.hora || "";
   $("aprIndicaciones").value = "";
-  cargarIndicacionesSelect("");
+  cargarIndicacionesSelect("", "");
+  actualizarModalAprobar();
   $("aprResumen").textContent = `Solicitud de DNI ${s.dni} · ${s.telefono} · Recibida el ${formatearFechaHora(s.creadoEl)}. Revisa la orden antes de confirmar.`;
   $("modalAprobar").classList.add("visible");
 }
 
-$("aprTipo").addEventListener("change", () => cargarIndicacionesSelect($("aprTipo").value));
+$("aprTipo").addEventListener("change", () => {
+  actualizarModalAprobar();
+  if ($("aprTipo").value !== TIPO_CITA_RESIDENTE) $("aprEstudio").value = "";
+  cargarIndicacionesSelect($("aprTipo").value, $("aprEstudio").value);
+});
+$("aprEstudio").addEventListener("change", () =>
+  cargarIndicacionesSelect($("aprTipo").value, $("aprEstudio").value));
 $("aprIndicacionSelect").addEventListener("change", async (e) => {
   const tipo = $("aprTipo").value;
   const idx = e.target.value;
   if (tipo === "" || idx === "") return;
   try {
-    const lista = await leerIndicacionesTipo(tipo);
+    const lista = await leerIndicacionesTipo(tipo, $("aprEstudio").value);
     if (lista[idx] !== undefined) $("aprIndicaciones").value = lista[idx];
   } catch (err) {
     console.error("Error al cargar indicación:", err);
@@ -368,22 +420,26 @@ $("aprIndicacionSelect").addEventListener("change", async (e) => {
 $("aprCancelar").addEventListener("click", () => $("modalAprobar").classList.remove("visible"));
 $("aprConfirmar").addEventListener("click", async () => {
   const tipo = $("aprTipo").value;
+  const esContraste = tipo === TIPO_CITA_RESIDENTE;
+  const estudio = $("aprEstudio").value;
   const fecha = $("aprFecha").value;
   const hora = $("aprHora").value;
   const indicaciones = $("aprIndicaciones").value.trim();
   if (!tipo) return alert("Selecciona el tipo de examen.");
-  if (!fecha || !hora) return alert("Indica fecha y hora de la cita.");
+  if (esContraste && !estudio) return alert("Selecciona el estudio específico que se va a realizar.");
+  if (esContraste && (!fecha || !hora)) return alert("Indica fecha y hora de la cita.");
   if (!indicaciones) return alert("Escribe las indicaciones para el paciente.");
 
   const btn = $("aprConfirmar");
   btn.disabled = true;
   try {
+    // Contraste: el residente cita de una vez. Eco/biopsia: queda «validada»
+    // y el digitador le asignará fecha y hora desde «Por citar».
+    const datos = esContraste
+      ? { estado: "citada", tipo, estudio, fecha, hora, indicaciones }
+      : { estado: "validada", tipo, estudio: "", indicaciones };
     await update(ref(db, `solicitudes/${idAprobando}`), {
-      estado: "aprobada",
-      tipo,
-      fecha,
-      hora,
-      indicaciones,
+      ...datos,
       paciente: $("aprPaciente").value.trim(),
       residente: datosUsuario.nombre,
       aprobadaEl: new Date().toISOString()
@@ -391,7 +447,7 @@ $("aprConfirmar").addEventListener("click", async () => {
     $("modalAprobar").classList.remove("visible");
   } catch (err) {
     console.error(err);
-    alert("Error al confirmar la cita. Intenta de nuevo.");
+    alert("Error al confirmar. Intenta de nuevo.");
   } finally {
     btn.disabled = false;
   }
@@ -429,22 +485,94 @@ $("recConfirmar").addEventListener("click", async () => {
 });
 
 // ============================================================
-//  DESCARGA CON SELLO (solo en la descarga; original intacto)
+//  DESCARGA CON SELLO — primero vista previa, luego se decide
+//  (el PDF se genera siempre, incluso para fotos; original intacto)
 // ============================================================
 async function descargarSellado(sol) {
-  const lineas = lineasSello(sol);
-  const nombre = `solicitud_sellada_${sol.dni}_${sol.fecha}.`;
   try {
-    if (esPdf(sol.archivoUrl)) {
-      await descargarPdfSellado(sol.archivoUrl, lineas, nombre + "pdf");
-    } else {
-      await descargarUrl(urlImagenSellada(sol.archivoPublicId, lineas), nombre + "jpg");
-    }
+    const { bytes, nombre } = await generarPdfSellado(sol);
+    mostrarVistaPrevia(bytes, nombre);
   } catch (err) {
     console.error(err);
-    alert("No se pudo generar el archivo sellado. Intenta de nuevo.");
+    alert("No se pudo generar el documento sellado. Intenta de nuevo.");
   }
 }
+
+// ============================================================
+//  POR CITAR (digitador): solicitudes validadas por el residente
+//  de ecografías/biopsias, a las que el digitador asigna fecha y hora
+// ============================================================
+function renderPorCitar() {
+  const lista = $("listaPorCitar");
+  lista.innerHTML = "";
+  const filtradas = solicitudesCache
+    .filter((s) => s.estado === "validada")
+    .sort((a, b) => (b.aprobadaEl || "").localeCompare(a.aprobadaEl || ""));
+
+  $("porCitarVacio").classList.toggle("oculto", filtradas.length > 0);
+  $("porCitarVacio").textContent = ultimoErrorCarga
+    ? ultimoErrorCarga + " — revisa F12 → Consola para más detalle."
+    : "No hay solicitudes esperando fecha. Aquí aparecerán las ecografías y biopsias que el residente valide.";
+
+  filtradas.forEach((s) => {
+    const item = document.createElement("div");
+    item.className = "solicitud-item";
+    item.innerHTML = `
+      <div class="datos">
+        <div>DNI: <span class="dni">${s.dni}</span> &nbsp; <span class="etiqueta etiqueta-validada">Validada — sin fecha</span></div>
+        <div class="meta">
+          📞 ${s.telefono} · ${nombreExamen(s)}${s.paciente ? " · " + escapar(s.paciente) : ""}
+          <br>Validada el ${formatearFechaHora(s.aprobadaEl)} por ${escapar(s.residente || "-")}
+          ${s.indicaciones ? `<br>Indicaciones: ${escapar(s.indicaciones)}` : ""}
+        </div>
+      </div>
+      <div class="acciones">
+        <button class="btn btn-gris btn-chico" data-ver="${s.id}" type="button">👁️ Ver solicitud</button>
+        <button class="btn btn-primario btn-chico" data-citar="${s.id}" type="button">📅 Asignar fecha</button>
+      </div>`;
+    lista.appendChild(item);
+  });
+
+  lista.querySelectorAll("[data-ver]").forEach((b) =>
+    b.addEventListener("click", () => window.open(buscar(b.dataset.ver).archivoUrl, "_blank")));
+  lista.querySelectorAll("[data-citar]").forEach((b) =>
+    b.addEventListener("click", () => abrirCitar(b.dataset.citar)));
+}
+
+function abrirCitar(id, editando = false) {
+  const s = buscar(id);
+  if (!s) return;
+  idCitando = id;
+  $("citTitulo").textContent = editando ? "✏️ Editar fecha y hora de la cita" : "📅 Asignar fecha y hora de la cita";
+  $("citResumen").textContent = `DNI ${s.dni} · ${nombreExamen(s)} · ${s.telefono}.`;
+  $("citFecha").value = s.fecha || fechaHoy();
+  $("citHora").value = s.hora || "";
+  $("modalCitar").classList.add("visible");
+}
+
+$("citCancelar").addEventListener("click", () => $("modalCitar").classList.remove("visible"));
+$("citConfirmar").addEventListener("click", async () => {
+  const fecha = $("citFecha").value;
+  const hora = $("citHora").value;
+  if (!fecha || !hora) return alert("Indica fecha y hora de la cita.");
+  const btn = $("citConfirmar");
+  btn.disabled = true;
+  try {
+    await update(ref(db, `solicitudes/${idCitando}`), {
+      estado: "citada",
+      fecha,
+      hora,
+      citadaEl: new Date().toISOString(),
+      citadaPor: datosUsuario.nombre
+    });
+    $("modalCitar").classList.remove("visible");
+  } catch (err) {
+    console.error(err);
+    alert("Error al asignar la cita. Intenta de nuevo.");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ============================================================
 //  LISTADO PARA DIGITADOR ESSI (residente + digitador)
@@ -475,10 +603,10 @@ async function cargarListado() {
   // Mismo origen de datos para todos los roles (residente, digitador y admin)
   if (!solicitudesCache.length) await cargarSolicitudes();
 
-  // El filtro es por FECHA DE APROBACIÓN (lo que el residente aprobó ese día),
+  // El filtro es por FECHA DE APROBACIÓN/VALIDACIÓN (lo que el residente aprobó ese día),
   // no por la fecha futura de la cita.
   const filtradas = solicitudesCache
-    .filter((s) => s.estado === "aprobada")
+    .filter(esCitada)
     .filter((s) => {
       const dia = (s.aprobadaEl || "").slice(0, 10);
       return dia >= desde && dia <= hasta;
@@ -490,24 +618,61 @@ async function cargarListado() {
   tbody.innerHTML = "";
   $("listadoVacio").classList.toggle("oculto", filtradas.length > 0);
 
+  const cargadas = filtradas.filter((s) => s.cargadoESSI).length;
+  $("listadoContador").textContent = filtradas.length
+    ? `${cargadas} de ${filtradas.length} cargadas en ESSI`
+    : "";
+
   filtradas.forEach((s, i) => {
     const tr = document.createElement("tr");
+    if (s.cargadoESSI) tr.classList.add("fila-atenuada");
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td><strong>${s.dni}</strong></td>
       <td>${escapar(s.paciente || "-")}</td>
-      <td>${tipoExamenTexto(s.tipo)}</td>
+      <td>${nombreExamen(s)}</td>
       <td>${s.fecha}</td>
       <td>${s.hora}</td>
       <td>${formatearFechaHora(s.aprobadaEl)}</td>
       <td>${s.telefono}</td>
-      <td><button class="btn btn-gris btn-chico" data-doc="${s.id}" type="button">⬇️ Sellado</button></td>`;
+      <td>
+        <label class="check-essi" title="Marcar cuando se haya cargado en ESSI">
+          <input type="checkbox" data-essi="${s.id}" ${s.cargadoESSI ? "checked" : ""}> Cargado
+        </label>
+      </td>
+      <td>
+        <button class="btn btn-gris btn-chico" data-doc="${s.id}" type="button">⬇️ Sellado</button>
+        ${s.tipo !== TIPO_CITA_RESIDENTE ? `<button class="btn btn-gris btn-chico" data-editar-cita="${s.id}" type="button" title="Corregir fecha u hora">✏️</button>` : ""}
+      </td>`;
     tbody.appendChild(tr);
   });
+
   tbody.querySelectorAll("[data-doc]").forEach((b) =>
     b.addEventListener("click", () => {
       const s = [...filtradas].find((x) => x.id === b.dataset.doc);
       if (s) descargarSellado(s);
+    }));
+  tbody.querySelectorAll("[data-editar-cita]").forEach((b) =>
+    b.addEventListener("click", () => abrirCitar(b.dataset.editarCita, true)));
+  tbody.querySelectorAll("[data-essi]").forEach((c) =>
+    c.addEventListener("change", async () => {
+      try {
+        const resp = await fetch(`${firebaseConfig.databaseURL}/solicitudes/${c.dataset.essi}.json`, {
+          method: "PATCH",
+          body: JSON.stringify({ cargadoESSI: c.checked, cargadoESSEl: c.checked ? new Date().toISOString() : null })
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const s = solicitudesCache.find((x) => x.id === c.dataset.essi);
+        if (s) { s.cargadoESSI = c.checked; }
+        c.closest("tr").classList.toggle("fila-atenuada", c.checked);
+        const total = filtradas.length;
+        const hechas = filtradas.filter((x) => (x.id === c.dataset.essi ? c.checked : x.cargadoESSI)).length;
+        $("listadoContador").textContent = `${hechas} de ${total} cargadas en ESSI`;
+      } catch (err) {
+        console.error(err);
+        c.checked = !c.checked;
+        alert("No se pudo guardar la marca. Intenta de nuevo.");
+      }
     }));
 }
 
@@ -517,7 +682,7 @@ $("btnListadoPdf").addEventListener("click", async () => {
   const hasta = $("listadoHasta").value;
   const tipo = $("listadoTipo").value;
   const filtradas = solicitudesCache
-    .filter((s) => s.estado === "aprobada")
+    .filter(esCitada)
     .filter((s) => {
       const dia = (s.aprobadaEl || "").slice(0, 10);
       return dia >= desde && dia <= hasta;
@@ -541,11 +706,12 @@ $("btnListadoPdf").addEventListener("click", async () => {
   doc.setFontSize(10);
   doc.text(`Aprobadas del ${desde} al ${hasta}${tipo ? "  ·  Examen: " + tipoExamenTexto(tipo) : ""}  ·  Generado: ${new Date().toLocaleString("es-PE")}`, 14, 32);
 
-  const cabeceras = [["N°", "DNI", "Paciente", "Examen", "Fecha cita", "Hora", "Aprobada el", "Contacto", "Indicaciones"]];
+  const cabeceras = [["N°", "DNI", "Paciente", "Examen", "Fecha cita", "Hora", "Aprobada el", "Contacto", "Indicaciones", "ESSI"]];
   const filas = filtradas.map((s, i) => [
-    String(i + 1), s.dni, s.paciente || "-", tipoExamenTexto(s.tipo), s.fecha, s.hora,
+    String(i + 1), s.dni, s.paciente || "-", nombreExamen(s), s.fecha, s.hora,
     formatearFechaHora(s.aprobadaEl), s.telefono,
-    (s.indicaciones || "").replace(/\n/g, " ")
+    (s.indicaciones || "").replace(/\n/g, " "),
+    s.cargadoESSI ? "✓" : "—"
   ]);
 
   doc.autoTable({
@@ -557,7 +723,8 @@ $("btnListadoPdf").addEventListener("click", async () => {
     columnStyles: { 7: { cellWidth: 70 } }
   });
 
-  doc.save(`listado_citas_${desde}_${hasta}.pdf`);
+  // Vista previa primero; se descarga solo si se decide
+  mostrarVistaPrevia(doc.output("arraybuffer"), `listado_citas_${desde}_${hasta}.pdf`);
 });
 
 // ============================================================
@@ -660,7 +827,99 @@ $("btnCrearUsuario").addEventListener("click", async () => {
 });
 
 // ============================================================
-//  INDICACIONES (admin)
+//  ESTUDIOS CONTRASTADOS (admin)
+// ============================================================
+async function leerEstudios() {
+  const resp = await fetch(`${firebaseConfig.databaseURL}/estudios.json`);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  const data = await resp.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function guardarEstudios(lista) {
+  const resp = await fetch(`${firebaseConfig.databaseURL}/estudios.json`, {
+    method: "PUT",
+    body: JSON.stringify(lista || [])
+  });
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+}
+
+async function cargarEstudios() {
+  const contenedor = $("listaEstudios");
+  contenedor.innerHTML = "";
+  let estudios = [];
+  try {
+    estudios = await leerEstudios();
+  } catch (err) {
+    console.error(err);
+    alerta("alertaEstudio", "error", "No se pudo cargar la lista de estudios.");
+  }
+  $("estudiosVacio").classList.toggle("oculto", estudios.length > 0);
+  estudios.forEach((texto, i) => {
+    const item = document.createElement("div");
+    item.className = "solicitud-item";
+    item.innerHTML = `
+      <div class="datos"><div class="meta">${escapar(texto)}</div></div>
+      <div class="acciones">
+        <button class="btn btn-gris btn-chico" data-editar-est="${i}" type="button">✏️ Editar</button>
+        <button class="btn btn-rojo btn-chico" data-borrar-est="${i}" type="button">🗑️ Eliminar</button>
+      </div>`;
+    contenedor.appendChild(item);
+  });
+  contenedor.querySelectorAll("[data-editar-est]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const i = Number(b.dataset.editarEst);
+      const actual = estudios[i] || "";
+      const nuevo = prompt("Nombre del estudio:", actual);
+      if (nuevo === null) return;
+      if (!nuevo.trim()) return alert("El nombre no puede quedar vacío.");
+      if (nuevo.trim() === actual) return;
+      estudios[i] = nuevo.trim();
+      try {
+        await guardarEstudios(estudios);
+        cargarEstudios();
+      } catch (err) {
+        console.error(err);
+        alert("No se pudo guardar. Intenta de nuevo.");
+      }
+    }));
+  contenedor.querySelectorAll("[data-borrar-est]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const i = Number(b.dataset.borrarEst);
+      if (!confirm(`¿Eliminar el estudio «${estudios[i]}»? Las indicaciones guardadas bajo ese nombre también dejarán de mostrarse.`)) return;
+      estudios.splice(i, 1);
+      try {
+        await guardarEstudios(estudios);
+        cargarEstudios();
+      } catch (err) {
+        console.error(err);
+        alert("No se pudo eliminar. Intenta de nuevo.");
+      }
+    }));
+}
+
+$("btnAgregarEstudio").addEventListener("click", async () => {
+  const texto = $("estNombre").value.trim();
+  if (!texto) return alerta("alertaEstudio", "error", "Escribe el nombre del estudio (ej: HSG).");
+  const btn = $("btnAgregarEstudio");
+  btn.disabled = true;
+  try {
+    const lista = await leerEstudios();
+    lista.push(texto);
+    await guardarEstudios(lista);
+    $("estNombre").value = "";
+    alerta("alertaEstudio", "ok", `✅ Estudio «${texto}» agregado.`);
+    cargarEstudios();
+  } catch (err) {
+    console.error(err);
+    alerta("alertaEstudio", "error", "No se pudo guardar. Intenta de nuevo.");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ============================================================
+//  INDICACIONES (admin) — por estudio específico en contrastes
 // ============================================================
 function llenarSelectIndicacionesAdmin() {
   const sel = $("indTipo");
@@ -674,14 +933,51 @@ function llenarSelectIndicacionesAdmin() {
 }
 llenarSelectIndicacionesAdmin();
 
-async function leerIndicacionesTipo(tipo) {
+async function llenarSelectEstudiosIndicaciones() {
+  const sel = $("indEstudio");
+  sel.innerHTML = '<option value="">— Seleccionar estudio —</option>';
+  try {
+    (await leerEstudios()).forEach((texto) => {
+      const op = document.createElement("option");
+      op.value = texto;
+      op.textContent = texto;
+      sel.appendChild(op);
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function estudioSeleccionadoIndicaciones() {
+  return $("indTipo").value === TIPO_CITA_RESIDENTE ? $("indEstudio").value : "";
+}
+
+async function leerIndicacionesTipo(tipo, estudio) {
   const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`);
   if (!resp.ok) throw new Error("HTTP " + resp.status);
   const data = await resp.json();
+  if (tipo === TIPO_CITA_RESIDENTE) {
+    // Formato: objeto { "HSG": [indicaciones…], "Cistografía": […] }
+    if (!data || Array.isArray(data)) return [];
+    return Array.isArray(data[estudio]) ? data[estudio] : [];
+  }
   return Array.isArray(data) ? data : [];
 }
 
-async function guardarListaIndicaciones(tipo, lista) {
+async function guardarListaIndicaciones(tipo, estudio, lista) {
+  if (tipo === TIPO_CITA_RESIDENTE) {
+    const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    const obj = (data && !Array.isArray(data)) ? data : {};
+    obj[estudio] = lista || [];
+    const r2 = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`, {
+      method: "PUT",
+      body: JSON.stringify(obj)
+    });
+    if (!r2.ok) throw new Error("HTTP " + r2.status);
+    return;
+  }
   const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones/${tipo}.json`, {
     method: "PUT",
     body: JSON.stringify(lista || [])
@@ -689,18 +985,28 @@ async function guardarListaIndicaciones(tipo, lista) {
   if (!resp.ok) throw new Error("HTTP " + resp.status);
 }
 
+$("indTipo").addEventListener("change", () => {
+  $("campoIndEstudio").classList.toggle("oculto", $("indTipo").value !== TIPO_CITA_RESIDENTE);
+  cargarIndicaciones();
+});
+$("indEstudio").addEventListener("change", cargarIndicaciones);
+
 $("btnGuardarIndicacion").addEventListener("click", async () => {
   const tipo = $("indTipo").value;
+  const estudio = estudioSeleccionadoIndicaciones();
   const texto = $("indTexto").value.trim();
+  if (tipo === TIPO_CITA_RESIDENTE && !estudio) {
+    return alerta("alertaIndicacion", "error", "Selecciona primero el estudio (o agrégalo en la sección «Estudios»).");
+  }
   if (!texto) return alerta("alertaIndicacion", "error", "Escribe el texto de la indicación.");
   const btn = $("btnGuardarIndicacion");
   btn.disabled = true;
   try {
-    const lista = await leerIndicacionesTipo(tipo);
+    const lista = await leerIndicacionesTipo(tipo, estudio);
     lista.push(texto);
-    await guardarListaIndicaciones(tipo, lista);
+    await guardarListaIndicaciones(tipo, estudio, lista);
     $("indTexto").value = "";
-    alerta("alertaIndicacion", "ok", `✅ Indicación agregada a «${TIPOS_EXAMEN[tipo]}».`);
+    alerta("alertaIndicacion", "ok", `✅ Indicación agregada a «${estudio || TIPOS_EXAMEN[tipo]}».`);
     cargarIndicaciones();
   } catch (err) {
     console.error(err);
@@ -714,27 +1020,38 @@ async function cargarIndicaciones() {
   const contenedor = $("listaIndicaciones");
   contenedor.innerHTML = "";
   let data = null;
+  let estudios = [];
   try {
     const resp = await fetch(`${firebaseConfig.databaseURL}/indicaciones.json`);
     if (resp.ok) data = await resp.json();
+    estudios = await leerEstudios();
   } catch (err) {
     console.error(err);
   }
-  if (!data) {
+  const grupos = [];
+  // Contrastes: un grupo por estudio específico
+  const porEstudio = (data && data[TIPO_CITA_RESIDENTE] && !Array.isArray(data[TIPO_CITA_RESIDENTE])) ? data[TIPO_CITA_RESIDENTE] : {};
+  estudios.forEach((estudio) => {
+    const lista = Array.isArray(porEstudio[estudio]) ? porEstudio[estudio] : [];
+    if (lista.length) grupos.push({ titulo: `🩻 ${TIPOS_EXAMEN[TIPO_CITA_RESIDENTE]} — ${estudio}`, tipo: TIPO_CITA_RESIDENTE, estudio, lista });
+  });
+  // Biopsia y ecografía: un solo grupo por categoría
+  Object.entries(TIPOS_EXAMEN).forEach(([tipo, nombre]) => {
+    if (tipo === TIPO_CITA_RESIDENTE) return;
+    const lista = (data && Array.isArray(data[tipo])) ? data[tipo] : [];
+    if (lista.length) grupos.push({ titulo: `🩻 ${nombre}`, tipo, estudio: "", lista });
+  });
+
+  if (!grupos.length) {
     contenedor.innerHTML = '<p class="texto-centrado" style="color: var(--gris);">Aún no hay indicaciones registradas.</p>';
     return;
   }
-  // Desglose por examen, en el orden definido en TIPOS_EXAMEN
-  let hayAlgo = false;
-  Object.entries(TIPOS_EXAMEN).forEach(([tipo, nombre]) => {
-    const lista = Array.isArray(data[tipo]) ? data[tipo] : [];
-    if (!lista.length) return;
-    hayAlgo = true;
+  grupos.forEach((g) => {
     const titulo = document.createElement("h3");
     titulo.style.cssText = "margin: 14px 0 8px; color: var(--azul-oscuro); font-size: .95rem;";
-    titulo.textContent = `🩻 ${nombre} (${lista.length})`;
+    titulo.textContent = `${g.titulo} (${g.lista.length})`;
     contenedor.appendChild(titulo);
-    lista.forEach((texto, i) => {
+    g.lista.forEach((texto, i) => {
       const item = document.createElement("div");
       item.className = "solicitud-item";
       item.innerHTML = `
@@ -742,20 +1059,16 @@ async function cargarIndicaciones() {
           <div class="meta" style="white-space: pre-wrap;">${escapar(texto)}</div>
         </div>
         <div class="acciones">
-          <button class="btn btn-gris btn-chico" data-editar="${tipo}|${i}" type="button">✏️ Editar</button>
-          <button class="btn btn-rojo btn-chico" data-borrar="${tipo}|${i}" type="button">🗑️ Eliminar</button>
+          <button class="btn btn-gris btn-chico" data-editar="${g.tipo}|${g.estudio}|${i}" type="button">✏️ Editar</button>
+          <button class="btn btn-rojo btn-chico" data-borrar="${g.tipo}|${g.estudio}|${i}" type="button">🗑️ Eliminar</button>
         </div>`;
       contenedor.appendChild(item);
     });
   });
-  if (!hayAlgo) {
-    contenedor.innerHTML = '<p class="texto-centrado" style="color: var(--gris);">Aún no hay indicaciones registradas.</p>';
-    return;
-  }
   contenedor.querySelectorAll("[data-editar]").forEach((b) =>
     b.addEventListener("click", async () => {
-      const [tipo, idx] = b.dataset.editar.split("|");
-      const lista = await leerIndicacionesTipo(tipo);
+      const [tipo, estudio, idx] = b.dataset.editar.split("|");
+      const lista = await leerIndicacionesTipo(tipo, estudio);
       const actual = lista[Number(idx)] || "";
       const nuevo = prompt("Edita la indicación (el residente podrá ajustarla aún más al aprobar):", actual);
       if (nuevo === null) return;
@@ -763,15 +1076,15 @@ async function cargarIndicaciones() {
       if (nuevo.trim() === actual) return;
       if (!confirm("¿Guardar los cambios de esta indicación?")) return;
       lista[Number(idx)] = nuevo.trim();
-      await guardarListaIndicaciones(tipo, lista);
+      await guardarListaIndicaciones(tipo, estudio, lista);
       cargarIndicaciones();
     }));
   contenedor.querySelectorAll("[data-borrar]").forEach((b) =>
     b.addEventListener("click", async () => {
-      const [tipo, idx] = b.dataset.borrar.split("|");
+      const [tipo, estudio, idx] = b.dataset.borrar.split("|");
       if (!confirm("¿Eliminar esta indicación pregrabada?")) return;
-      const lista = (await leerIndicacionesTipo(tipo)).filter((_, i) => i !== Number(idx));
-      await guardarListaIndicaciones(tipo, lista);
+      const lista = (await leerIndicacionesTipo(tipo, estudio)).filter((_, i) => i !== Number(idx));
+      await guardarListaIndicaciones(tipo, estudio, lista);
       cargarIndicaciones();
     }));
 }

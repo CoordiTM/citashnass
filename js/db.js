@@ -4,13 +4,13 @@ import {
   getDatabase, ref, push, set, get, update, remove,
   query, orderByChild, equalTo
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-import { firebaseConfig, cloudinaryConfig, TIPOS_EXAMEN, ESTADOS, NOMBRE_HOSPITAL, NOMBRE_SERVICIO, ROLES, CLAVE_SAL } from "./config.js";
+import { firebaseConfig, cloudinaryConfig, TIPOS_EXAMEN, TIPO_CITA_RESIDENTE, ESTADOS, NOMBRE_HOSPITAL, NOMBRE_SERVICIO, ROLES, CLAVE_SAL } from "./config.js";
 
 export const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 
 export { ref, push, set, get, update, remove, query, orderByChild, equalTo };
-export { TIPOS_EXAMEN, ESTADOS, NOMBRE_HOSPITAL, NOMBRE_SERVICIO, ROLES };
+export { TIPOS_EXAMEN, TIPO_CITA_RESIDENTE, ESTADOS, NOMBRE_HOSPITAL, NOMBRE_SERVICIO, ROLES };
 export { cloudinaryConfig };
 
 // Cifrado de claves: se guarda el hash, nunca la clave en texto plano
@@ -51,9 +51,21 @@ function envolverTexto(texto, ancho) {
   return lineas;
 }
 
+// Nombre del examen que se muestra en pantallas, PDF y sello:
+// el estudio específico (ej. HSG) si existe; si no, la categoría.
+export function nombreExamen(sol) {
+  return (sol.estudio || "").trim() || tipoExamenTexto(sol.tipo);
+}
+
+// Una solicitud tiene cita confirmada cuando está «citada»
+// (o «aprobada», que era el nombre anterior de ese estado).
+export function esCitada(sol) {
+  return sol.estado === "citada" || sol.estado === "aprobada";
+}
+
 export function lineasSello(sol) {
   const lineas = [`CITA: ${sol.fecha} ${sol.hora}`];
-  lineas.push(`DNI ${sol.dni} · ${NOMBRE_SERVICIO}`);
+  lineas.push(`DNI ${sol.dni} · ${nombreExamen(sol)}`);
   const indicaciones = (sol.indicaciones || "").trim();
   if (indicaciones) {
     lineas.push("INDICACIONES:");
@@ -66,64 +78,117 @@ export function lineasSello(sol) {
   return lineas;
 }
 
-// Imagen: Cloudinary genera el sello como transformación sobre la copia
-export function urlImagenSellada(publicId, lineas) {
-  // Cloudinary no acepta comas (",") ni barras ("/") dentro del texto del sello:
-  // las reemplazamos por caracteres que sí renderiza.
-  const textoSeguro = lineas
-    .join("\n")
-    .replace(/,/g, " · ")
-    .replace(/\//g, "-");
-  const texto = encodeURIComponent(textoSeguro).replace(/'/g, "%27");
-  const transformacion = `l_text:Arial_76_bold:${texto},co_rgb:ffffff,b_rgb:1e429f,g_south,y_40,x_20`;
-  return `https://res.cloudinary.com/${cloudinaryConfig.cloudName}/image/upload/${transformacion}/${publicId}.jpg`;
+// ---------- Sello dibujado con pdf-lib (una sola vía para PDF y fotos) ----------
+function pintarSello(pagina, lineas, fuente, fuenteNegrita) {
+  const { width } = pagina.getSize();
+  const altoLinea = 28, margenX = 24, padding = 20;
+  const altoCaja = padding * 2 + 40 + (lineas.length - 1) * altoLinea;
+  pagina.drawRectangle({
+    x: 0, y: 0, width, height: altoCaja,
+    color: PDFLib.rgb(0.118, 0.259, 0.624), opacity: 0.95
+  });
+  let y = altoCaja - padding - 28;
+  lineas.forEach((linea, i) => {
+    const titular = i === 0;
+    pagina.drawText(linea, {
+      x: margenX, y,
+      size: titular ? 36 : 21,
+      font: titular ? fuenteNegrita : fuente,
+      color: PDFLib.rgb(1, 1, 1)
+    });
+    y -= titular ? 44 : altoLinea;
+  });
+  return altoCaja;
 }
 
-// PDF: se estampa una banda inferior en el navegador con pdf-lib antes de descargar
-export async function descargarPdfSellado(urlOriginal, lineas, nombreArchivo) {
+// PDF original: se le agrega la banda del sello a cada página
+export async function bytesPdfSellado(urlOriginal, lineas) {
   const resp = await fetch(urlOriginal);
   const bytes = await resp.arrayBuffer();
   const pdfDoc = await PDFLib.PDFDocument.load(bytes);
   const fuente = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
   const fuenteNegrita = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
-  const paginas = pdfDoc.getPages();
-  paginas.forEach((pagina) => {
-    const { width } = pagina.getSize();
-    const altoLinea = 28, margenX = 24, padding = 20;
-    const altoCaja = padding * 2 + 40 + (lineas.length - 1) * altoLinea;
-    pagina.drawRectangle({
-      x: 0, y: 0, width, height: altoCaja,
-      color: PDFLib.rgb(0.118, 0.259, 0.624), opacity: 0.95
-    });
-    let y = altoCaja - padding - 28;
-    lineas.forEach((linea, i) => {
-      const titular = i === 0;
-      pagina.drawText(linea, {
-        x: margenX, y,
-        size: titular ? 36 : 21,
-        font: titular ? fuenteNegrita : fuente,
-        color: PDFLib.rgb(1, 1, 1)
-      });
-      y -= titular ? 44 : altoLinea;
-    });
-  });
-  const nuevo = await pdfDoc.save();
-  const blob = new Blob([nuevo], { type: "application/pdf" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = nombreArchivo;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  pdfDoc.getPages().forEach((pagina) => pintarSello(pagina, lineas, fuente, fuenteNegrita));
+  return pdfDoc.save();
 }
 
-export async function descargarUrl(url, nombreArchivo) {
-  const resp = await fetch(url);
-  const blob = await resp.blob();
+// Foto original: se coloca dentro de un PDF A4 con el sello abajo
+export async function bytesPdfDesdeImagen(urlImagen, lineas) {
+  const resp = await fetch(urlImagen);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  const bytes = await resp.arrayBuffer();
+  const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+  const pdfDoc = await PDFLib.PDFDocument.create();
+  const pagina = pdfDoc.addPage([595.28, 841.89]); // A4
+  let imagen;
+  if (contentType.includes("png")) {
+    imagen = await pdfDoc.embedPng(bytes);
+  } else if (contentType.includes("jpe") || contentType.includes("jpg")) {
+    imagen = await pdfDoc.embedJpg(bytes);
+  } else {
+    // Último recurso: intentar como JPG por la extensión de la URL
+    try { imagen = await pdfDoc.embedJpg(bytes); }
+    catch { imagen = await pdfDoc.embedPng(bytes); }
+  }
+  const { width, height } = pagina.getSize();
+  const margen = 24;
+  const anchoCajaSello = 20 * 2 + 40 + (lineas.length - 1) * 28;
+  const areaAncho = width - margen * 2;
+  const areaAlto = height - margen - anchoCajaSello - 12;
+  const escala = Math.min(areaAncho / imagen.width, areaAlto / imagen.height);
+  const anchoImg = imagen.width * escala;
+  const altoImg = imagen.height * escala;
+  pagina.drawImage(imagen, {
+    x: (width - anchoImg) / 2,
+    y: anchoCajaSello + 12,
+    width: anchoImg,
+    height: altoImg
+  });
+  const fuente = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const fuenteNegrita = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+  pintarSello(pagina, lineas, fuente, fuenteNegrita);
+  return pdfDoc.save();
+}
+
+// Genera el PDF sellado de una solicitud (PDF o foto → siempre PDF)
+export async function generarPdfSellado(sol) {
+  const lineas = lineasSello(sol);
+  const nombre = `solicitud_sellada_${sol.dni}_${sol.fecha}.pdf`;
+  const bytes = esPdf(sol.archivoUrl)
+    ? await bytesPdfSellado(sol.archivoUrl, lineas)
+    : await bytesPdfDesdeImagen(sol.archivoUrl, lineas);
+  return { bytes, nombre };
+}
+
+export function descargarBytes(bytes, nombreArchivo) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = nombreArchivo;
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// Ventana de vista previa: se revisa el PDF y se descarga solo si se decide
+export function mostrarVistaPrevia(bytes, nombreArchivo) {
+  document.getElementById("vistaPreviaModal")?.remove();
+  const fondo = document.createElement("div");
+  fondo.className = "vista-previa-fondo";
+  fondo.id = "vistaPreviaModal";
+  const urlBlob = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  fondo.innerHTML = `
+    <div class="vista-previa">
+      <iframe src="${urlBlob}" title="Vista previa"></iframe>
+      <div class="vista-previa-barra">
+        <button class="btn btn-primario" type="button">⬇️ Descargar PDF</button>
+        <button class="btn btn-gris" type="button">Cerrar</button>
+      </div>
+    </div>`;
+  const [btnDescargar, btnCerrar] = fondo.querySelectorAll("button");
+  btnDescargar.addEventListener("click", () => descargarBytes(bytes, nombreArchivo));
+  btnCerrar.addEventListener("click", () => { URL.revokeObjectURL(urlBlob); fondo.remove(); });
+  fondo.addEventListener("click", (e) => { if (e.target === fondo) { URL.revokeObjectURL(urlBlob); fondo.remove(); } });
+  document.body.appendChild(fondo);
 }
 
 // ---------- Fechas ----------

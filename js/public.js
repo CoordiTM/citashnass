@@ -2,8 +2,8 @@
 import {
   db, ref, push, set,
   subirArchivo,
-  urlImagenSellada, descargarPdfSellado, descargarUrl, lineasSello,
-  formatearFechaHora, tipoExamenTexto, esPdf,
+  generarPdfSellado, mostrarVistaPrevia, nombreExamen, esCitada,
+  formatearFechaHora,
   NOMBRE_HOSPITAL, NOMBRE_SERVICIO
 } from "./db.js";
 import { firebaseConfig } from "./config.js";
@@ -138,11 +138,12 @@ async function buscarCita() {
 
 function renderResultados(lista) {
   const contenedor = $("resultadoConsulta");
-  const aprobadas = lista.filter((s) => s.estado === "aprobada").length;
+  const confirmadas = lista.filter((s) => esCitada(s)).length;
+  const validadas = lista.filter((s) => s.estado === "validada").length;
   let html = "";
   if (lista.length > 1) {
     html += `<p style="color: var(--gris); font-size: .9rem; margin-bottom: 12px;">
-      Se encontraron <strong>${lista.length} solicitudes</strong> para este DNI${aprobadas ? ` (${aprobadas} cita${aprobadas > 1 ? "s" : ""} confirmada${aprobadas > 1 ? "s" : ""})` : ""}, de la más reciente a la más antigua:
+      Se encontraron <strong>${lista.length} solicitudes</strong> para este DNI${confirmadas ? ` (${confirmadas} cita${confirmadas > 1 ? "s" : ""} confirmada${confirmadas > 1 ? "s" : ""})` : ""}${validadas ? ` (${validadas} en espera de fecha)` : ""}, de la más reciente a la más antigua:
     </p>`;
   }
   html += lista.map((sol, i) => tarjetaResultado(sol, i)).join("");
@@ -170,6 +171,20 @@ function tarjetaResultado(sol, i) {
       </div>`;
   }
 
+  if (sol.estado === "validada") {
+    return `
+      <div class="tarjeta resultado-cita">
+        <div class="icono-grande">🕐</div>
+        <h2>Solicitud aprobada</h2>
+        <span class="etiqueta etiqueta-tipo">${nombreExamen(sol)}</span>
+        <p style="color: var(--gris); margin-top: 8px;">
+          Tu solicitud fue aprobada el ${formatearFechaHora(sol.aprobadaEl)}.
+          El servicio te asignará la fecha y hora próximamente;
+          vuelve a consultar con tu DNI más tarde.
+        </p>
+      </div>`;
+  }
+
   if (sol.estado === "rechazada") {
     return `
       <div class="tarjeta resultado-cita">
@@ -184,18 +199,18 @@ function tarjetaResultado(sol, i) {
       </div>`;
   }
 
-  // Aprobada
+  // Citada (incluye las aprobadas antes del cambio de flujo)
   return `
     <div class="tarjeta resultado-cita">
       <div class="icono-grande">✅</div>
       <h2>Tu cita está confirmada</h2>
-      <span class="etiqueta etiqueta-tipo">${tipoExamenTexto(sol.tipo)}</span>
+      <span class="etiqueta etiqueta-tipo">${nombreExamen(sol)}</span>
       <div class="fecha-grande">📅 ${sol.fecha} &nbsp;·&nbsp; 🕐 ${sol.hora}</div>
       <div class="indicaciones-caja"><strong>Indicaciones:</strong><br>${escapar(sol.indicaciones || "Sin indicaciones.")}</div>
       <p style="color: var(--gris); font-size: .85rem;">DNI: ${sol.dni} · Confirmada el ${formatearFechaHora(sol.aprobadaEl)}</p>
       <div class="flex mt" style="justify-content: center;">
-        <button class="btn btn-primario" id="btnPdfCita${i}">⬇️ Descargar cita (PDF)</button>
-        <button class="btn btn-gris" id="btnSello${i}">⬇️ Solicitud con sello de cita</button>
+        <button class="btn btn-primario" id="btnPdfCita${i}" type="button">👁️ Ver cita (PDF)</button>
+        <button class="btn btn-gris" id="btnSello${i}" type="button">👁️ Solicitud con sello</button>
       </div>
     </div>`;
 }
@@ -232,7 +247,7 @@ function descargarPdfCita(sol) {
     y += 8;
   };
   linea("DNI:", sol.dni);
-  linea("Examen:", tipoExamenTexto(sol.tipo));
+  linea("Examen:", nombreExamen(sol));
   linea("Fecha:", sol.fecha);
   linea("Hora:", sol.hora);
   linea("Contacto:", sol.telefono);
@@ -249,21 +264,17 @@ function descargarPdfCita(sol) {
   doc.text("Presenta este documento junto con tu solicitud original en Rayos X.", ancho / 2, y, { align: "center" });
   doc.text(`Generado el ${new Date().toLocaleString("es-PE")}`, ancho / 2, y + 5, { align: "center" });
 
-  doc.save(`cita_${sol.dni}_${sol.fecha}.pdf`);
+  // Vista previa primero; se descarga solo si se decide
+  mostrarVistaPrevia(doc.output("arraybuffer"), `cita_${sol.dni}_${sol.fecha}.pdf`);
 }
 
-// ---------- Solicitud sellada (solo en la descarga) ----------
+// ---------- Solicitud sellada (solo en la descarga; original intacto) ----------
 async function descargarSellado(sol) {
-  const lineas = lineasSello(sol);
-  const nombre = `solicitud_sellada_${sol.dni}_${sol.fecha}.`;
   try {
-    if (esPdf(sol.archivoUrl)) {
-      await descargarPdfSellado(sol.archivoUrl, lineas, nombre + "pdf");
-    } else {
-      await descargarUrl(urlImagenSellada(sol.archivoPublicId, lineas), nombre + "jpg");
-    }
+    const { bytes, nombre } = await generarPdfSellado(sol);
+    mostrarVistaPrevia(bytes, nombre);
   } catch (err) {
     console.error(err);
-    alert("No se pudo generar el archivo sellado. Intenta de nuevo.");
+    alert("No se pudo generar el documento sellado. Intenta de nuevo.");
   }
 }
