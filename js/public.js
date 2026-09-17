@@ -2,7 +2,7 @@
 import {
   db, ref, push, set, get, query, orderByChild, equalTo,
   subirArchivo,
-  urlImagenSellada, descargarPdfSellado, descargarUrl, textoSello,
+  urlImagenSellada, descargarPdfSellado, descargarUrl, lineasSello,
   formatearFechaHora, tipoExamenTexto, esPdf,
   NOMBRE_HOSPITAL, NOMBRE_SERVICIO
 } from "./db.js";
@@ -235,13 +235,13 @@ function descargarPdfCita(sol) {
 
 // ---------- Solicitud sellada (solo en la descarga) ----------
 async function descargarSellado(sol) {
-  const sello = textoSello(sol);
+  const lineas = lineasSello(sol);
   const nombre = `solicitud_sellada_${sol.dni}_${sol.fecha}.`;
   try {
     if (esPdf(sol.archivoUrl)) {
-      await descargarPdfSellado(sol.archivoUrl, sello, nombre + "pdf");
+      await descargarPdfSellado(sol.archivoUrl, lineas, nombre + "pdf");
     } else {
-      await descargarUrl(urlImagenSellada(sol.archivoPublicId, sello), nombre + "jpg");
+      await descargarUrl(urlImagenSellada(sol.archivoPublicId, lineas), nombre + "jpg");
     }
   } catch (err) {
     console.error(err);

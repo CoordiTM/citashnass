@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import {
   db, set, hashClave,
-  urlImagenSellada, descargarPdfSellado, descargarUrl, textoSello,
+  urlImagenSellada, descargarPdfSellado, descargarUrl, lineasSello,
   formatearFechaHora, tipoExamenTexto, esPdf, fechaHoy,
   NOMBRE_HOSPITAL, NOMBRE_SERVICIO, TIPOS_EXAMEN, ROLES
 } from "./db.js";
@@ -429,13 +429,13 @@ $("recConfirmar").addEventListener("click", async () => {
 //  DESCARGA CON SELLO (solo en la descarga; original intacto)
 // ============================================================
 async function descargarSellado(sol) {
-  const sello = textoSello(sol);
+  const lineas = lineasSello(sol);
   const nombre = `solicitud_sellada_${sol.dni}_${sol.fecha}.`;
   try {
     if (esPdf(sol.archivoUrl)) {
-      await descargarPdfSellado(sol.archivoUrl, sello, nombre + "pdf");
+      await descargarPdfSellado(sol.archivoUrl, lineas, nombre + "pdf");
     } else {
-      await descargarUrl(urlImagenSellada(sol.archivoPublicId, sello), nombre + "jpg");
+      await descargarUrl(urlImagenSellada(sol.archivoPublicId, lineas), nombre + "jpg");
     }
   } catch (err) {
     console.error(err);
