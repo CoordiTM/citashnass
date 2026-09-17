@@ -24,12 +24,15 @@ let idRechazando = null;
 // ============================================================
 //  SESIÓN (usuario + clave, sin Firebase Auth)
 // ============================================================
-function guardarSesion(u) { localStorage.setItem(SESION_KEY, JSON.stringify(u)); }
+// La sesión vive en sessionStorage: cada pestaña tiene su propia sesión
+// y al cerrar la pestaña se cierra la sesión automáticamente.
+function guardarSesion(u) { sessionStorage.setItem(SESION_KEY, JSON.stringify(u)); }
 function obtenerSesion() {
-  try { return JSON.parse(localStorage.getItem(SESION_KEY)); } catch { return null; }
+  try { return JSON.parse(sessionStorage.getItem(SESION_KEY)); } catch { return null; }
 }
 function cerrarSesion() {
-  localStorage.removeItem(SESION_KEY);
+  sessionStorage.removeItem(SESION_KEY);
+  localStorage.removeItem(SESION_KEY); // limpiar sesión antigua (localStorage)
   location.reload();
 }
 
@@ -59,7 +62,7 @@ async function entrar(u) {
       const snapU = await get(ref(db, `usuarios/${sesion.usuario}`));
       const u = snapU.val();
       if (u && u.activo !== false && u.clave === sesion.clave) return entrar({ usuario: sesion.usuario, ...u });
-      localStorage.removeItem(SESION_KEY);
+      sessionStorage.removeItem(SESION_KEY);
     }
   } catch (err) {
     console.error(err);
