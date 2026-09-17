@@ -1,11 +1,12 @@
 // Portal público: solicitar cita y consultar por DNI
 import {
-  db, ref, push, set, get, query, orderByChild, equalTo,
+  db, ref, push, set,
   subirArchivo,
   urlImagenSellada, descargarPdfSellado, descargarUrl, lineasSello,
   formatearFechaHora, tipoExamenTexto, esPdf,
   NOMBRE_HOSPITAL, NOMBRE_SERVICIO
 } from "./db.js";
+import { firebaseConfig } from "./config.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -110,18 +111,22 @@ async function buscarCita() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Buscando…';
   try {
-    const consulta = query(ref(db, "solicitudes"), orderByChild("dni"), equalTo(dni));
-    const snap = await get(consulta);
-    if (!snap.exists()) {
+    // Lectura directa por REST: funciona incluso en la red del hospital
+    const resp = await fetch(`${firebaseConfig.databaseURL}/solicitudes.json`);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    const encontradas = [];
+    if (data) {
+      Object.entries(data).forEach(([id, valor]) => {
+        if (valor.dni === dni) encontradas.push({ id, ...valor });
+      });
+    }
+    if (!encontradas.length) {
       return mostrarAlerta("alertaConsulta", "error", "No se encontró ninguna solicitud con ese DNI. Verifica el número o presenta tu solicitud en la ventanilla de Rayos X.");
     }
-    // La solicitud más reciente
-    let masReciente = null;
-    snap.forEach((child) => {
-      const s = { id: child.key, ...child.val() };
-      if (!masReciente || s.creadoEl > masReciente.creadoEl) masReciente = s;
-    });
-    renderResultado(masReciente);
+    // De la más reciente a la más antigua
+    encontradas.sort((a, b) => (b.creadoEl || "").localeCompare(a.creadoEl || ""));
+    renderResultados(encontradas);
   } catch (err) {
     console.error(err);
     mostrarAlerta("alertaConsulta", "error", "Error al consultar. Intenta de nuevo.");
@@ -131,10 +136,29 @@ async function buscarCita() {
   }
 }
 
-function renderResultado(sol) {
+function renderResultados(lista) {
   const contenedor = $("resultadoConsulta");
+  const aprobadas = lista.filter((s) => s.estado === "aprobada").length;
+  let html = "";
+  if (lista.length > 1) {
+    html += `<p style="color: var(--gris); font-size: .9rem; margin-bottom: 12px;">
+      Se encontraron <strong>${lista.length} solicitudes</strong> para este DNI${aprobadas ? ` (${aprobadas} cita${aprobadas > 1 ? "s" : ""} confirmada${aprobadas > 1 ? "s" : ""})` : ""}, de la más reciente a la más antigua:
+    </p>`;
+  }
+  html += lista.map((sol, i) => tarjetaResultado(sol, i)).join("");
+  contenedor.innerHTML = html;
+  lista.forEach((sol, i) => {
+    const btnPdf = $("btnPdfCita" + i);
+    const btnSello = $("btnSello" + i);
+    if (btnPdf) btnPdf.addEventListener("click", () => descargarPdfCita(sol));
+    if (btnSello) btnSello.addEventListener("click", () => descargarSellado(sol));
+  });
+  contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function tarjetaResultado(sol, i) {
   if (sol.estado === "pendiente") {
-    contenedor.innerHTML = `
+    return `
       <div class="tarjeta resultado-cita">
         <div class="icono-grande">⏳</div>
         <h2>Solicitud en revisión</h2>
@@ -144,11 +168,10 @@ function renderResultado(sol) {
           Vuelve a consultar más tarde con tu DNI.
         </p>
       </div>`;
-    return;
   }
 
   if (sol.estado === "rechazada") {
-    contenedor.innerHTML = `
+    return `
       <div class="tarjeta resultado-cita">
         <div class="icono-grande">❌</div>
         <h2>Solicitud rechazada</h2>
@@ -159,11 +182,10 @@ function renderResultado(sol) {
           Corrige lo indicado y vuelve a enviar tu solicitud, o acude a la ventanilla de Rayos X.
         </p>
       </div>`;
-    return;
   }
 
   // Aprobada
-  contenedor.innerHTML = `
+  return `
     <div class="tarjeta resultado-cita">
       <div class="icono-grande">✅</div>
       <h2>Tu cita está confirmada</h2>
@@ -172,13 +194,10 @@ function renderResultado(sol) {
       <div class="indicaciones-caja"><strong>Indicaciones:</strong><br>${escapar(sol.indicaciones || "Sin indicaciones.")}</div>
       <p style="color: var(--gris); font-size: .85rem;">DNI: ${sol.dni} · Confirmada el ${formatearFechaHora(sol.aprobadaEl)}</p>
       <div class="flex mt" style="justify-content: center;">
-        <button class="btn btn-primario" id="btnPdfCita">⬇️ Descargar cita (PDF)</button>
-        <button class="btn btn-gris" id="btnSello">⬇️ Solicitud con sello de cita</button>
+        <button class="btn btn-primario" id="btnPdfCita${i}">⬇️ Descargar cita (PDF)</button>
+        <button class="btn btn-gris" id="btnSello${i}">⬇️ Solicitud con sello de cita</button>
       </div>
     </div>`;
-
-  $("btnPdfCita").addEventListener("click", () => descargarPdfCita(sol));
-  $("btnSello").addEventListener("click", () => descargarSellado(sol));
 }
 
 function escapar(texto) {
